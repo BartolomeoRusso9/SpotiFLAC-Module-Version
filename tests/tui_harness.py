@@ -18,11 +18,11 @@ import asyncio
 import functools
 from typing import Any, cast
 
-from SpotiFLAC.tui.app import SpotiFLACTui
+from mornye.tui.app import MornyeTui
 
 
-def app_of(pilot: Any) -> SpotiFLACTui:
-    return cast(SpotiFLACTui, pilot.app)
+def app_of(pilot: Any) -> MornyeTui:
+    return cast(MornyeTui, pilot.app)
 
 
 def drives_the_ui(test):

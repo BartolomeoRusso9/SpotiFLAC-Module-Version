@@ -19,7 +19,7 @@ import os
 
 import pytest
 
-from SpotiFLAC.core.tagger import MAX_FLAC_PICTURE_BYTES, fit_cover
+from mornye.core.tagger import MAX_FLAC_PICTURE_BYTES, fit_cover
 
 PIL = pytest.importorskip("PIL", reason="Pillow is a declared dependency")
 

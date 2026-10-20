@@ -2,7 +2,7 @@
 
 A hand-picked selection cannot be expressed as a collection URL, so
 _download_task built a list of track links — and then called
-client.SpotiFLAC() once per link. Each call is a one-shot session (its own
+client.Mornye() once per link. Each call is a one-shot session (its own
 event loop, httpx pool, ExtensionManager and provider set), so the console
 showed a full "[RUN] 1 track(s)" pipeline per track, the provider bootstrap
 ran again for every one of them, and max_concurrent_downloads had nothing to
@@ -18,9 +18,9 @@ import time
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from mornye.app import MornyeAPI
+from mornye.core.models import TrackMetadata
+from mornye.downloader import DownloadOptions, MornyeDownloader
 from tests.application_download_capture import capture_service
 
 
@@ -40,7 +40,7 @@ def captured_calls(tmp_path, monkeypatch) -> Any:
 
     def _run(indices, config=None, tracks=3, url=""):
         before = len(seen)
-        api = SpotiFLAC_API()
+        api = MornyeAPI()
         api.download_dir = str(tmp_path)
         api.current_tracks = [_FakeTrack(n) for n in range(tracks)]
         api.current_url = url
@@ -107,7 +107,7 @@ def test_quality_survives_the_trip_to_each_provider() -> None:
     for it. This is the hop where a picked HI_RES_LOSSLESS could silently
     become a CD-quality request without anything logging a word.
     """
-    from SpotiFLAC.core.quality import normalize_quality, quality_for_provider
+    from mornye.core.quality import normalize_quality, quality_for_provider
 
     q = "HI_RES_LOSSLESS"
     assert normalize_quality(q) == q
@@ -140,9 +140,9 @@ def test_two_batches_never_run_at_the_same_time(tmp_path, monkeypatch) -> None:
             time.sleep(0.15)
             running -= 1
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", BlockingService)
+    monkeypatch.setattr("mornye.application.DownloadService", BlockingService)
 
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     api.download_dir = str(tmp_path)
     api.current_tracks = [_FakeTrack(n) for n in range(2)]
     api.current_url = ""
@@ -167,7 +167,7 @@ def test_the_finished_event_names_the_batch_it_closes(tmp_path, monkeypatch) -> 
     pushed: list[tuple] = []
     capture_service(monkeypatch, [])
 
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     api.download_dir = str(tmp_path)
     api.current_tracks = [_FakeTrack(n) for n in range(3)]
     api.current_url = ""
@@ -180,9 +180,9 @@ def test_the_finished_event_names_the_batch_it_closes(tmp_path, monkeypatch) -> 
 
 
 def test_the_sync_wrapper_routes_a_batch_to_the_single_run_path(monkeypatch) -> None:
-    """client.SpotiFLAC() is what the GUI calls; batch_tracks is what tells
+    """client.Mornye() is what the GUI calls; batch_tracks is what tells
     it the URLs are tracks and not one collection each."""
-    from SpotiFLAC import client as client_mod
+    from mornye import client as client_mod
 
     seen: dict[str, Any] = {}
 
@@ -202,15 +202,15 @@ def test_the_sync_wrapper_routes_a_batch_to_the_single_run_path(monkeypatch) -> 
         async def download_batch(self, urls, *, loop_minutes=None) -> None:
             seen["batch"] = urls
 
-    monkeypatch.setattr(client_mod, "AsyncSpotiFLAC", _FakeClient)
+    monkeypatch.setattr(client_mod, "AsyncMornye", _FakeClient)
 
-    client_mod.SpotiFLAC(url=["u1", "u2"], output_dir="/tmp/out", batch_tracks=True)
+    client_mod.Mornye(url=["u1", "u2"], output_dir="/tmp/out", batch_tracks=True)
     assert seen["tracks"] == ["u1", "u2"]
     assert "batch" not in seen
 
     seen.clear()
     # Default off: a caller that predates the flag keeps one run per URL.
-    client_mod.SpotiFLAC(url=["p1", "p2"], output_dir="/tmp/out")
+    client_mod.Mornye(url=["p1", "p2"], output_dir="/tmp/out")
     assert seen["batch"] == ["p1", "p2"]
     assert "tracks" not in seen
 
@@ -224,14 +224,14 @@ def _meta(track_id: str) -> TrackMetadata:
 @pytest.fixture()
 def batching_downloader(tmp_path, monkeypatch) -> Any:
     """A downloader whose metadata/worker layers are recorded, not run."""
-    downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
     runs: list[dict] = []
 
     async def _fake_metadata(url):
         if "missing" in url:
-            from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
+            from mornye.core.errors import ErrorKind, MornyeError
 
-            raise SpotiflacError(ErrorKind.TRACK_NOT_FOUND, "gone")
+            raise MornyeError(ErrorKind.TRACK_NOT_FOUND, "gone")
         track_id = url.rsplit("/", 1)[-1]
         return f"Album {track_id}", [_meta(track_id)], {"type": "track"}
 

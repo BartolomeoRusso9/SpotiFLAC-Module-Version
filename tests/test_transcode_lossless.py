@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core import tagger, transcode
-from SpotiFLAC.core.errors import SpotiflacError
+from mornye.core import tagger, transcode
+from mornye.core.errors import MornyeError
 
 _HAS_FFMPEG = shutil.which("ffmpeg") is not None
 needs_ffmpeg = pytest.mark.skipif(_HAS_FFMPEG is False, reason="ffmpeg not installed")
@@ -120,7 +120,7 @@ def test_transcoded_path_uses_the_container_extension(tmp_path):
 
 
 def test_format_spec_rejects_unknown_names():
-    with pytest.raises(SpotiflacError):
+    with pytest.raises(MornyeError):
         transcode.format_spec("aac")
 
 
@@ -347,7 +347,7 @@ def test_alac_target_does_not_mistake_a_lossy_m4a_for_itself(tone, tmp_path):
 
 
 def test_missing_source_raises(tmp_path):
-    with pytest.raises(SpotiflacError, match="file not found"):
+    with pytest.raises(MornyeError, match="file not found"):
         asyncio.run(transcode.transcode_file_async(tmp_path / "ghost.flac", fmt="alac"))
 
 
@@ -524,7 +524,7 @@ def test_tta_gets_id3_tags_rather_than_failing_on_apev2(tone):
 # The three UIs must offer exactly what the core can produce
 # ---------------------------------------------------------------------------
 
-_FRONTEND = Path(__file__).resolve().parent.parent / "SpotiFLAC" / "frontend"
+_FRONTEND = Path(__file__).resolve().parent.parent / "Mornye" / "frontend"
 
 
 def test_web_ui_offers_every_supported_format():
@@ -552,7 +552,7 @@ def test_every_frontend_offers_every_supported_format():
 
     # The TUI builds its Select straight from it, and "" stands in for None
     # because a Select cannot hold None as an ordinary value.
-    from SpotiFLAC.tui.config_view import ConfigPanel  # noqa: F401
+    from mornye.tui.config_view import ConfigPanel  # noqa: F401
 
     assert transcode.transcode_label(None) == transcode.TRANSCODE_CHOICES[0][0]
     assert transcode.transcode_label("mp3").startswith("MP3")
@@ -571,7 +571,7 @@ def test_every_target_produces_a_valid_download_result(fmt):
     handing it "alac" (whose container is "m4a") failed validation and turned
     a finished download into "Unexpected error: 1 validation error".
     """
-    from SpotiFLAC.core.models import DownloadResult
+    from mornye.core.models import DownloadResult
 
     label = transcode.result_format_for(fmt)
     result = DownloadResult.ok(
@@ -594,7 +594,7 @@ def test_audio_format_literal_covers_every_supported_target():
     """Adding a format to core.transcode must widen models.AudioFormat too."""
     from typing import get_args
 
-    from SpotiFLAC.core.models import AudioFormat
+    from mornye.core.models import AudioFormat
 
     produced = {transcode.result_format_for(f) for f in transcode.SUPPORTED_FORMATS}
     assert produced <= set(get_args(AudioFormat))
@@ -629,7 +629,7 @@ def _printed_command(cfg: dict) -> list[str]:
     frontend's printing of it: what these tests are about is which flags a
     configuration produces, not how any one UI renders them.
     """
-    from SpotiFLAC.core.cli_preview import build_command_parts
+    from mornye.core.cli_preview import build_command_parts
 
     return build_command_parts(cfg)
 
@@ -637,8 +637,8 @@ def _printed_command(cfg: dict) -> list[str]:
 def _reparse(argv: list[str]):
     import sys
 
-    from SpotiFLAC.downloader import DownloadOptions
-    from SpotiFLAC.launcher import parse_args
+    from mornye.downloader import DownloadOptions
+    from mornye.launcher import parse_args
 
     original = sys.argv
     try:
@@ -709,7 +709,7 @@ def test_printed_command_round_trips_the_remaining_profile_settings(key, value, 
     """
     import sys
 
-    from SpotiFLAC.launcher import parse_args
+    from mornye.launcher import parse_args
 
     argv = _printed_command({**_WIZARD_BASE, key: value})
     original = sys.argv
@@ -742,9 +742,9 @@ def test_profile_model_keeps_every_key_save_profile_writes():
     import re
     from pathlib import Path
 
-    from SpotiFLAC.core.profiles import ProfileConfig
+    from mornye.core.profiles import ProfileConfig
 
-    launcher = Path(__file__).resolve().parent.parent / "SpotiFLAC" / "launcher.py"
+    launcher = Path(__file__).resolve().parent.parent / "Mornye" / "launcher.py"
     src = launcher.read_text(encoding="utf-8")
     block = src[src.index("profile_cfg = {") :]
     block = block[: block.index("}\n")]
@@ -761,11 +761,11 @@ def test_profile_model_keeps_every_key_save_profile_writes():
 def _parse(argv: list[str], profile_defaults: dict | None = None):
     import sys
 
-    from SpotiFLAC.launcher import parse_args
+    from mornye.launcher import parse_args
 
     original = sys.argv
     try:
-        sys.argv = ["spotiflac", "https://x/y", "/out", *argv]
+        sys.argv = ["mornye", "https://x/y", "/out", *argv]
         return parse_args(profile_defaults or {})
     finally:
         sys.argv = original
@@ -809,7 +809,7 @@ def test_printed_command_round_trips_the_fallback_choice():
 
 
 def _level(argv: list[str], profile_defaults: dict | None = None) -> int:
-    from SpotiFLAC.launcher import _resolve_log_level
+    from mornye.launcher import _resolve_log_level
 
     args = _parse(argv, profile_defaults)
     return _resolve_log_level(args.verbose, args.log_level, args.profile_log_level)
@@ -875,12 +875,12 @@ def test_output_path_is_absolute_for_a_relative_output_dir(
 
     The path is handed to JS extensions as a plain string, and their Node
     process runs with its own cwd (the extension folder). With a relative
-    path the extension wrote under ~/.spotiflac/extensions/<name>/, while
+    path the extension wrote under ~/.mornye/extensions/<name>/, while
     the host looked in ./<output_dir>/ — the download then failed as
     "Download returned no usable audio (segments unmergeable)".
     """
-    from SpotiFLAC.core.models import TrackMetadata
-    from SpotiFLAC.extensions.provider import JSExtensionProvider
+    from mornye.core.models import TrackMetadata
+    from mornye.extensions.provider import JSExtensionProvider
 
     monkeypatch.chdir(tmp_path)
     provider = JSExtensionProvider.__new__(JSExtensionProvider)
@@ -925,7 +925,7 @@ def test_default_level_is_info_so_download_milestones_are_visible():
 
 def test_noisy_libraries_are_pinned_below_the_default_level():
     """INFO is only usable as a default if httpx isn't logging every request."""
-    from SpotiFLAC.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
+    from mornye.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
 
     _quiet_noisy_libraries(logging.INFO)
     for name in _NOISY_LIBRARY_LOGGERS:
@@ -934,7 +934,7 @@ def test_noisy_libraries_are_pinned_below_the_default_level():
 
 def test_debug_lifts_the_pin_on_libraries():
     """A network problem is exactly when httpcore's frames are worth reading."""
-    from SpotiFLAC.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
+    from mornye.launcher import _NOISY_LIBRARY_LOGGERS, _quiet_noisy_libraries
 
     _quiet_noisy_libraries(logging.DEBUG)
     for name in _NOISY_LIBRARY_LOGGERS:
@@ -957,7 +957,7 @@ def test_signed_session_names_the_audio_fetch_at_info():
 
     src = (
         Path(__file__).resolve().parent.parent
-        / "SpotiFLAC"
+        / "Mornye"
         / "core"
         / "signed_session_mobile.py"
     ).read_text(encoding="utf-8")

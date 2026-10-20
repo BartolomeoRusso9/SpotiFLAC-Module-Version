@@ -15,11 +15,11 @@ never answer the question you actually have — *what came out since last time?*
 A **subscription** is a followed URL plus the set of releases already seen.
 
 ```bash
-spotiflac --subscribe "https://open.spotify.com/artist/<id>"
-spotiflac --subscriptions          # list
-spotiflac --check-subscriptions    # what's new? (reports only)
-spotiflac --check-subscriptions --download --profile my-setup
-spotiflac --unsubscribe "https://open.spotify.com/artist/<id>"
+mornye --subscribe "https://open.spotify.com/artist/<id>"
+mornye --subscriptions          # list
+mornye --check-subscriptions    # what's new? (reports only)
+mornye --check-subscriptions --download --profile my-setup
+mornye --unsubscribe "https://open.spotify.com/artist/<id>"
 ```
 
 ### The first check does not download your back catalogue
@@ -35,11 +35,11 @@ inflict by default. If you *do* want the existing catalogue:
 
 ```bash
 # On a new subscription:
-spotiflac --check-subscriptions --subscribe-backfill --download
+mornye --check-subscriptions --subscribe-backfill --download
 
 # On one you already follow — forget what it has seen first:
-spotiflac --subscribe-reset "https://open.spotify.com/artist/<id>"
-spotiflac --check-subscriptions --subscribe-backfill --download
+mornye --subscribe-reset "https://open.spotify.com/artist/<id>"
+mornye --check-subscriptions --subscribe-backfill --download
 ```
 
 ### Options
@@ -69,8 +69,8 @@ one — the same first-check rule applies, so the tracks already in the playlist
 are the baseline and only later additions are fetched.
 
 ```bash
-spotiflac --subscribe "https://open.spotify.com/playlist/<id>"
-spotiflac --check-subscriptions --download
+mornye --subscribe "https://open.spotify.com/playlist/<id>"
+mornye --check-subscriptions --download
 ```
 
 Unlike `--watch`, which re-syncs the whole playlist every pass, this fetches
@@ -79,7 +79,7 @@ only what was added, and a track you deleted from disk is not fetched again.
 ### Running it on a schedule
 
 ```cron
-0 9 * * * spotiflac --check-subscriptions --download --profile nas --json >> ~/spotiflac.log
+0 9 * * * mornye --check-subscriptions --download --profile nas --json >> ~/mornye.log
 ```
 
 Marking happens at check time, not after the download. A release whose
@@ -116,13 +116,13 @@ optionally re-downloads them.
 
 ```bash
 # Report only — always start here.
-spotiflac --upgrade-library ~/Music --upgrade-target LOSSLESS
+mornye --upgrade-library ~/Music --upgrade-target LOSSLESS
 
 # Include files that claim Hi-Res but whose audio stops at CD range.
-spotiflac --upgrade-library ~/Music --upgrade-target HI_RES --upgrade-verify-hires
+mornye --upgrade-library ~/Music --upgrade-target HI_RES --upgrade-verify-hires
 
 # Actually re-fetch them.
-spotiflac --upgrade-library ~/Music --upgrade-download --profile my-setup
+mornye --upgrade-library ~/Music --upgrade-download --profile my-setup
 ```
 
 ### Tiers
@@ -148,14 +148,14 @@ The container alone does not decide: `.m4a` holds both AAC (lossy) and ALAC
 A file can *declare* 24/96 and contain nothing above 22 kHz — the fingerprint
 of something upsampled from a CD — or declare 24-bit while only 16 of those
 bits ever carry data. `--upgrade-verify-hires` runs the checks from
-[`core/hires_check.py`](../../SpotiFLAC/core/hires_check.py) and reclassifies
+[`core/hires_check.py`](../../mornye/core/hires_check.py) and reclassifies
 such a file down to the tier its content justifies, naming which of the two
 it found. That is the only way "upgrade my library to Hi-Res" gives an honest
 answer.
 
 It is off by default because it decodes ~30 seconds per file. Nothing extra
 to install: the analysis runs on numpy and soundfile, which ship with
-SpotiFLAC.
+mornye.
 
 ### How a candidate is matched back to Spotify
 

@@ -18,7 +18,7 @@ import asyncio
 import httpx
 import pytest
 
-from SpotiFLAC.core.link_resolver import LinkResolver
+from mornye.core.link_resolver import LinkResolver
 
 #: Trimmed from the live page for ISRC GBUM71029604 (Bohemian Rhapsody).
 #: The artist links come first, exactly as songstats orders them.
@@ -154,7 +154,7 @@ def test_songstats_is_no_longer_asked_for_an_isrc():
     Spotify id serves a client-rendered shell with no ISRC in the HTML. The
     call was a request per track for a guaranteed None.
     """
-    from SpotiFLAC.core import isrc_helper
+    from mornye.core import isrc_helper
 
     helper = isrc_helper.IsrcHelper(None)
 
@@ -163,4 +163,4 @@ def test_songstats_is_no_longer_asked_for_an_isrc():
 
 def test_the_dead_module_is_gone():
     with pytest.raises(ImportError):
-        __import__("SpotiFLAC.core.songstats")
+        __import__("mornye.core.songstats")

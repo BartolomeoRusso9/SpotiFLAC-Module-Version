@@ -1,6 +1,6 @@
 """The GUI must hand the client every folder-layout option it exposes.
 
-client.SpotiFLAC defaults create_playlist_subfolders to False while the CLI
+client.Mornye defaults create_playlist_subfolders to False while the CLI
 and the interactive picker default it to True, so an option the GUI simply
 never passes does not fall back to the product default — it silently flips.
 That is what happened to playlist subfolders: the settings panel had no
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
+from mornye.app import MornyeAPI
 from tests.application_download_capture import capture_service
 
 
@@ -32,7 +32,7 @@ def captured_options(tmp_path, monkeypatch) -> Any:
     capture_service(monkeypatch, seen)
 
     def _run(config: dict) -> dict:
-        api = SpotiFLAC_API()
+        api = MornyeAPI()
         api.download_dir = str(tmp_path)
         api.current_tracks = [_FakeTrack()]
         api.current_url = _FakeTrack.external_url

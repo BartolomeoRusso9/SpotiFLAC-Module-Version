@@ -12,7 +12,7 @@ from typing import Any, cast
 
 import pytest
 
-from SpotiFLAC.core.link_resolver import LinkResolver
+from mornye.core.link_resolver import LinkResolver
 
 RESOLVED = {
     "success": True,

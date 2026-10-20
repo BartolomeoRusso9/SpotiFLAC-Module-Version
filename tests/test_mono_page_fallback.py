@@ -15,7 +15,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import signed_session_mono as mono
+from mornye.core import signed_session_mono as mono
 
 PRIMARY, FALLBACK = mono.MONOCHROME_PAGE_URLS
 
@@ -76,7 +76,7 @@ def test_browser_start_does_not_navigate(session, monkeypatch) -> None:
     monkeypatch.setattr(
         mono,
         "build_chromium_options",
-        lambda hidden: (_Options(), "/nonexistent/spotiflac-test-profile"),
+        lambda hidden: (_Options(), "/nonexistent/mornye-test-profile"),
     )
     try:
         asyncio.run(session._ensure_browser())

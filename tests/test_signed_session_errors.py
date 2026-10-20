@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from SpotiFLAC.core.signed_session_errors import (
+from mornye.core.signed_session_errors import (
     ACTION_BOOTSTRAP,
     ACTION_VERIFY,
     gateway_action,

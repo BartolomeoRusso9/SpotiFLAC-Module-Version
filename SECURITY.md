@@ -4,12 +4,13 @@
 
 Please report security issues **privately**, not as a public GitHub issue.
 
-- Preferred: [GitHub private vulnerability reporting](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/security/advisories/new)
-- Alternative: contact the maintainer through the
-  [Telegram community](https://t.me/SpotiFLAC_Chat) and ask for a private channel.
+- Preferred: [GitHub private vulnerability reporting](https://github.com/BartolomeoRusso9/Mornye-Python/security/advisories/new)
+- If private reporting is unavailable, contact the maintainer through an
+  already-established private channel. Do not publish sensitive details in a
+  public issue.
 
-A useful report includes the version (`spotiflac --version` or
-`pip show SpotiFLAC`), how SpotiFLAC was running (module import, CLI, `--gui`,
+A useful report includes the version (`mornye --version` or
+`pip show mornye-python`), how Mornye was running (module import, CLI, `--gui`,
 `--web`, Docker), and the smallest set of steps that shows the problem.
 
 You will get an acknowledgement within a few days. Fixes ship in the next
@@ -19,8 +20,8 @@ the release notes.
 
 ## Supported versions
 
-Only the latest release on PyPI receives security fixes. Older versions are
-not backported.
+Security fixes are made against the canonical repository. Older versions are
+not guaranteed to receive backports.
 
 ## Scope
 
@@ -28,18 +29,18 @@ In scope — anything in this repository:
 
 - The Python module and CLI.
 - The `--gui` (pywebview) and `--web` (FastAPI) interfaces, including the
-  frontend under `SpotiFLAC/frontend/`.
+  frontend under `mornye/frontend/`.
 - The extension loading, checksum and signature machinery
-  (`SpotiFLAC/extensions/`).
-- The published Docker image.
+  (`mornye/extensions/`).
+- The Docker image and its build workflow.
 
 Out of scope:
 
 - **Third-party extensions and registries.** Nothing is bundled: extensions
   are installed only from a source you configure yourself, and they run with
-  the same privileges as SpotiFLAC. The maintainer neither reviews nor
+  the same privileges as mornye. The maintainer neither reviews nor
   controls them. A malicious extension doing malicious things is that
-  extension's problem — a way for an extension to escape a limit SpotiFLAC
+  extension's problem — a way for an extension to escape a limit Mornye
   claims to enforce is ours.
 - The streaming services and metadata providers themselves.
 - Anything requiring an attacker to already have local code execution or
@@ -59,7 +60,7 @@ that the operator did not choose:
   separate tenants. See the note on `SESSION_COOKIE` in `webapp.py`.
 - **`--post-action command` runs a shell command.** From the CLI this is the
   operator's own shell, so it grants nothing new. It is *not* accepted from
-  the GUI/web bridge unless `SPOTIFLAC_ALLOW_POST_COMMAND=1` was set when the
+  the GUI/web bridge unless `MORNYE_ALLOW_POST_COMMAND=1` was set when the
   process started — a way to run one without that variable is a real finding.
 - **Installing an extension executes its code.** Checksums and Ed25519
   signatures tell you the package is the one the registry described; they

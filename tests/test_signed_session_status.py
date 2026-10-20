@@ -1,4 +1,4 @@
-"""core/signed_session_status.py against a fake ~/.spotiflac, never the real one.
+"""core/signed_session_status.py against a fake ~/.mornye, never the real one.
 
 Every test builds its own sessions and extensions directories under tmp_path
 and passes them explicitly, with a fixed `now`, so a state never depends on
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core import signed_session_status as sss
-from SpotiFLAC.core.signed_session_mobile import SignedSessionClient
+from mornye.core import signed_session_status as sss
+from mornye.core.signed_session_mobile import SignedSessionClient
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -81,7 +81,7 @@ def test_states_and_extension_join(dirs):
         extensions,
         "tidal-py",
         {"version": "1.0"},
-        source="from SpotiFLAC.core.signed_session_desktop import x",
+        source="from mornye.core.signed_session_desktop import x",
     )
 
     live = {"install_id": "i", "session_id": "s", "session_secret": "secret"}
@@ -180,7 +180,7 @@ def test_backoff_files_are_not_sessions_but_are_reported(dirs):
         platform=block["platform"],
         data_dir=str(sessions),
     )
-    from SpotiFLAC.core.signed_session_mobile import _auth_backoff_path
+    from mornye.core.signed_session_mobile import _auth_backoff_path
 
     _auth_backoff_path(client).write_text(
         json.dumps({"failures": 1, "not_before": NOW.timestamp() + 300})
@@ -295,8 +295,8 @@ def test_format_duration(seconds, text):
 
 
 def test_api_refuses_edits_to_non_admins(monkeypatch):
-    from SpotiFLAC.api_mixins.signed_sessions import SignedSessionsMixin
-    import SpotiFLAC.core.web_users as web_users
+    from mornye.api_mixins.signed_sessions import SignedSessionsMixin
+    import mornye.core.web_users as web_users
 
     api = SignedSessionsMixin()
     api.owner = "guest"

@@ -2,7 +2,7 @@
 
 `list_signed_sessions` and friends are replaced: what is under test is that
 the panel renders a row per session, clears the selected one and prunes —
-not what happens to be in the ~/.spotiflac of the machine running the suite.
+not what happens to be in the ~/.mornye of the machine running the suite.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.core import signed_session_status as sss
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.core import signed_session_status as sss
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
 
 _SIGNED_INDEX = [key for key, _ in MODES].index("signed")
 
@@ -62,7 +62,7 @@ def stub_sessions(monkeypatch):
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -76,7 +76,7 @@ async def _settled(pilot) -> None:
 async def test_lists_a_row_per_session(stub_sessions) -> None:
     from textual.widgets import DataTable
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 
@@ -90,7 +90,7 @@ async def test_lists_a_row_per_session(stub_sessions) -> None:
 async def test_clear_selected_clears_the_cursor_row(stub_sessions) -> None:
     from textual.widgets import Button, DataTable
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 
@@ -105,7 +105,7 @@ async def test_clear_selected_clears_the_cursor_row(stub_sessions) -> None:
 async def test_prune_removes_orphans(stub_sessions) -> None:
     from textual.widgets import Button, DataTable
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SIGNED_INDEX
         await _settled(pilot)
 

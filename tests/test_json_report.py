@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from SpotiFLAC.core.hooks import load_hooks, run_hooks
-from SpotiFLAC.core.models import DownloadResult
-from SpotiFLAC.core.report import RunReport
+from mornye.core.hooks import load_hooks, run_hooks
+from mornye.core.models import DownloadResult
+from mornye.core.report import RunReport
 
 
 class _Meta:

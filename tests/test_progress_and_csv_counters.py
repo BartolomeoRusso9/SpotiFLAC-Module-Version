@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core import csv_source
-from SpotiFLAC.extensions.provider import JSExtensionProvider, _TransferProgress
+from mornye.core import csv_source
+from mornye.extensions.provider import JSExtensionProvider, _TransferProgress
 
 # --- the CSV counter -------------------------------------------------------
 
@@ -108,7 +108,7 @@ def test_a_broken_progress_callback_does_not_lose_rows() -> None:
 
 
 class _API:
-    """Just enough of SpotiFLAC_API for the CSV mixin's counters."""
+    """Just enough of MornyeAPI for the CSV mixin's counters."""
 
     def __init__(self) -> None:
         self.download_dir = "."
@@ -128,8 +128,8 @@ class _API:
 
 def _fetching_api(monkeypatch, resolve):
     """A CSV mixin whose metadata lookups are `resolve(url)`, unthrottled."""
-    import SpotiFLAC.downloader as downloader_mod
-    from SpotiFLAC.api_mixins import csv_import
+    import mornye.downloader as downloader_mod
+    from mornye.api_mixins import csv_import
 
     class _Api(csv_import.CsvImportMixin, _API):
         pass
@@ -144,7 +144,7 @@ def _fetching_api(monkeypatch, resolve):
     # Report every link rather than four times a second: the throttle is
     # what these tests would otherwise be measuring.
     monkeypatch.setattr(csv_import, "PROGRESS_INTERVAL_S", 0.0)
-    monkeypatch.setattr(downloader_mod, "SpotiflacDownloader", _Downloader)
+    monkeypatch.setattr(downloader_mod, "MornyeDownloader", _Downloader)
     return _Api()
 
 
@@ -395,7 +395,7 @@ def test_the_runtime_hands_the_adapter_its_extra_arguments() -> None:
     fraction on TypeError. The adapter has to be the shape that gets the
     bytes, or the fallback silently reinstates the old behaviour.
     """
-    from SpotiFLAC.extensions.runtime import JSRuntime
+    from mornye.extensions.runtime import JSRuntime
 
     runtime = JSRuntime.__new__(JSRuntime)
     seen: list[tuple] = []
@@ -466,9 +466,9 @@ class _Client:
 
 
 def _signed_fetch(response, caplog, path="/tickets"):
-    from SpotiFLAC.core.signed_session_mobile import perform_signed_fetch
+    from mornye.core.signed_session_mobile import perform_signed_fetch
 
-    with caplog.at_level(logging.INFO, logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level(logging.INFO, logger="mornye.core.signed_session_mobile"):
         asyncio.run(perform_signed_fetch(_Client(response), "POST", path, {}, {}))
     return caplog.text
 
@@ -525,7 +525,7 @@ run('one-then-two', 5, [1, 2]);
 def _normalizer_source() -> str:
     """The real function out of the shipped bridge, not a copy of it."""
     source = (
-        Path(__file__).resolve().parents[1] / "SpotiFLAC" / "extensions" / "_bridge.js"
+        Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "_bridge.js"
     ).read_text()
     start = source.index("const progressScale = new Map()")
     end = source.index("};", source.index("const normalizeProgress")) + 2

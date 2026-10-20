@@ -1,11 +1,11 @@
-"""Tests for --watch's repeat loop (SpotiFLAC.launcher.watch_forever)."""
+"""Tests for --watch's repeat loop (mornye.launcher.watch_forever)."""
 
 from __future__ import annotations
 
 import asyncio
 import inspect
 
-from SpotiFLAC.launcher import watch_forever
+from mornye.launcher import watch_forever
 
 
 class _StopWatching(Exception):

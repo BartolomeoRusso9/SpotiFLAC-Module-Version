@@ -18,7 +18,7 @@ import tempfile
 
 import pytest
 
-from SpotiFLAC.core import solver
+from mornye.core import solver
 
 # The probe reaches an X server over an AF_UNIX socket, which Windows has no
 # notion of — CPython does not even define socket.AF_UNIX there. The two tests

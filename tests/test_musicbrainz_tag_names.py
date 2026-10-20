@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core.tagger import _embed_id3, _embed_m4a, read_embedded_tags
+from mornye.core.tagger import _embed_id3, _embed_m4a, read_embedded_tags
 
 _MB_TAGS = {
     "TITLE": "Bottiglie Privè",

@@ -12,12 +12,12 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import cache_admin
+from mornye.core import cache_admin
 
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path))
     (tmp_path / "responses" / "spotify").mkdir(parents=True)
     return tmp_path
 
@@ -37,7 +37,7 @@ def _write(path, payload="{}", age_days=0.0):
 
 
 def test_stats_on_a_missing_directory_is_not_an_error(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "nope"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "nope"))
     data = cache_admin.stats()
     assert data["exists"] is False
     assert data["entries"] == []
@@ -104,7 +104,7 @@ def test_prune_leaves_no_empty_namespace_directories(cache) -> None:
 
 
 def test_prune_on_a_missing_directory_is_a_no_op(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "nope"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "nope"))
     assert cache_admin.prune()["removed_files"] == 0
 
 

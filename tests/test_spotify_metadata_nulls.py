@@ -17,8 +17,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
-from SpotiFLAC.core.spotify_metadata import SpotifyMetadataClient
+from mornye.core.errors import ErrorKind, MornyeError
+from mornye.core.spotify_metadata import SpotifyMetadataClient
 
 
 class _FakeWebClient:
@@ -46,7 +46,7 @@ def _client(payload: dict, monkeypatch) -> SpotifyMetadataClient:
     async def _to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr("SpotiFLAC.core.spotify_metadata.asyncio.to_thread", _to_thread)
+    monkeypatch.setattr("mornye.core.spotify_metadata.asyncio.to_thread", _to_thread)
     return client
 
 
@@ -102,7 +102,7 @@ def test_an_unavailable_track_says_so_instead_of_arriving_untitled(monkeypatch) 
         monkeypatch,
     )
 
-    with pytest.raises(SpotiflacError) as excinfo:
+    with pytest.raises(MornyeError) as excinfo:
         asyncio.run(client.get_track_async("0NfjJ4sWSQJl2SOIQiEQId"))
 
     assert excinfo.value.kind is ErrorKind.UNAVAILABLE
@@ -116,7 +116,7 @@ def test_a_failed_query_is_reported_as_a_missing_track(monkeypatch) -> None:
     """
     client = _client({"data": None, "errors": [{"message": "boom"}]}, monkeypatch)
 
-    with pytest.raises(SpotiflacError) as excinfo:
+    with pytest.raises(MornyeError) as excinfo:
         asyncio.run(client.get_track_async("0" * 22))
 
     assert excinfo.value.kind is ErrorKind.TRACK_NOT_FOUND

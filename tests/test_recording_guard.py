@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import recording_guard
-from SpotiFLAC.core.recording_guard import (
+from mornye.core import recording_guard
+from mornye.core.recording_guard import (
     judge_resolved_recording,
     wrong_recording_reason_async,
 )

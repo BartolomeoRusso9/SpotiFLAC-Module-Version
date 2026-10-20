@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.extensions import python_provider
+from mornye.core.models import TrackMetadata
+from mornye.extensions import python_provider
 
 
 def _metadata() -> TrackMetadata:

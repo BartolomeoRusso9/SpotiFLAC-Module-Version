@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.hooks import HookLoadError, load_hook, load_hooks, run_hooks
-from SpotiFLAC.core.models import DownloadResult
+from mornye.core.hooks import HookLoadError, load_hook, load_hooks, run_hooks
+from mornye.core.models import DownloadResult
 
 # ── module-level targets for load_hook to resolve ──────────────────────────
 

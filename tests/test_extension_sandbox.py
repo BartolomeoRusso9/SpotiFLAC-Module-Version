@@ -16,7 +16,7 @@ import pathlib
 
 import pytest
 
-from SpotiFLAC.extensions import sandbox
+from mornye.extensions import sandbox
 
 
 @pytest.fixture(autouse=True)
@@ -30,8 +30,8 @@ def _clean_env(monkeypatch):
 
 def test_secrets_in_the_host_environment_are_not_handed_over(monkeypatch) -> None:
     for name in (
-        "SPOTIFLAC_WEB_TOKEN",
-        "SPOTIFLAC_LIBRARY_TOKEN",
+        "MORNYE_WEB_TOKEN",
+        "MORNYE_LIBRARY_TOKEN",
         "AWS_SECRET_ACCESS_KEY",
         "GITHUB_TOKEN",
         "DATABASE_URL",
@@ -41,8 +41,8 @@ def test_secrets_in_the_host_environment_are_not_handed_over(monkeypatch) -> Non
     env = sandbox.build_env()
 
     assert not any(name.startswith("AWS_") for name in env)
-    assert "SPOTIFLAC_WEB_TOKEN" not in env
-    assert "SPOTIFLAC_LIBRARY_TOKEN" not in env
+    assert "MORNYE_WEB_TOKEN" not in env
+    assert "MORNYE_LIBRARY_TOKEN" not in env
     assert "GITHUB_TOKEN" not in env
     assert "DATABASE_URL" not in env
     assert "super-secret" not in "".join(env.values())
@@ -138,10 +138,10 @@ def test_the_sandbox_can_be_switched_off(monkeypatch) -> None:
     """For anyone whose extension broke and who would rather have the old
     behaviour than debug it right now.
     """
-    monkeypatch.setenv("SPOTIFLAC_WEB_TOKEN", "secret")
+    monkeypatch.setenv("MORNYE_WEB_TOKEN", "secret")
     monkeypatch.setenv(sandbox.DISABLE_ENV, "1")
 
-    assert sandbox.build_env()["SPOTIFLAC_WEB_TOKEN"] == "secret"
+    assert sandbox.build_env()["MORNYE_WEB_TOKEN"] == "secret"
     assert "disabled" in sandbox.describe()
 
 
@@ -210,7 +210,7 @@ def test_the_hook_applies_limits_without_raising_them() -> None:
     """
     assert _in_subprocess("""
             import resource, sys
-            from SpotiFLAC.extensions.sandbox import build_preexec
+            from mornye.extensions.sandbox import build_preexec
 
             before, _ = resource.getrlimit(resource.RLIMIT_CPU)
             build_preexec(cpu_seconds=10**9)()
@@ -224,7 +224,7 @@ def test_the_hook_applies_limits_without_raising_them() -> None:
 @pytest.mark.skipif(os.name == "nt", reason="POSIX rlimits")
 def test_the_hook_is_safe_to_call_twice() -> None:
     assert _in_subprocess("""
-            from SpotiFLAC.extensions.sandbox import build_preexec
+            from mornye.extensions.sandbox import build_preexec
 
             hook = build_preexec(memory_mb=512)
             hook()

@@ -13,7 +13,7 @@ these tests are really about:
     verifies against the name the caller asked for and a resolver handing
     back somebody else's address fails the handshake;
   - private and loopback addresses are dropped from the answer, or this
-    becomes an SSRF primitive pointed at the machine SpotiFLAC runs on.
+    becomes an SSRF primitive pointed at the machine Mornye runs on.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import socket
 
 import pytest
 
-from SpotiFLAC.core import dns_doh
+from mornye.core import dns_doh
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +79,7 @@ def test_a_wrapped_cause_is_still_found() -> None:
 )
 def test_private_answers_are_refused(address) -> None:
     """A DoH resolver answering 127.0.0.1 would otherwise point this
-    straight at SpotiFLAC's own --web server.
+    straight at Mornye's own --web server.
     """
     assert not dns_doh._is_public(address)
 
@@ -161,7 +161,7 @@ def test_a_blocked_name_still_reaches_its_host(monkeypatch) -> None:
     """The whole point, with the system resolver denying the name the way an
     ISP's would.
     """
-    from SpotiFLAC.core.http import AsyncHttpClient
+    from mornye.core.http import AsyncHttpClient
 
     blocked = "api.zarz.moe"
     real_getaddrinfo = socket.getaddrinfo

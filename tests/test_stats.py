@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from SpotiFLAC.core import db, stats
+from mornye.core import db, stats
 
 
 def _add(

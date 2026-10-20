@@ -8,38 +8,38 @@
 
 ## Extensions
 
-SpotiFLAC has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself. Two extension runtimes are supported:
+Mornye has **no built-in download provider and no default extension source**. Every provider — Tidal, Qobuz, Amazon Music, Deezer, or anything else — is supplied entirely by extensions that you find, review, and choose to install yourself. Two extension runtimes are supported:
 
 - **JavaScript** — sharing the same extension format used by [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile), executed via a Node.js bridge.
-- **Python** — packaged as `.spotiflac-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
+- **Python** — packaged as `.mornye-ext` / `.sflx` files (a ZIP containing a manifest and a Python entry point), loaded directly in-process.
 
-Extensions are never fetched or installed automatically. You must explicitly configure a registry before SpotiFLAC will contact anything. There are several equivalent ways to do it — pick whichever fits your workflow:
+Extensions are never fetched or installed automatically. You must explicitly configure a registry before Mornye will contact anything. There are several equivalent ways to do it — pick whichever fits your workflow:
 
 **Environment variable:**
 
 ```bash
 # Comma-separated list of registry JSON URLs — none is set by default
-export SPOTIFLAC_REGISTRIES="https://example.com/my-registry.json"
+export MORNYE_REGISTRIES="https://example.com/my-registry.json"
 ```
 
 **`.env` file** (see `.env.example`):
 
 ```env
-SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json
+MORNYE_REGISTRIES=https://example.com/my-registry.json
 ```
 
-**CLI flag** (`--registries`, repeat once per URL) — persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once and it's picked up on every future run, exactly like a registry added from the GUI/Interactive wizard:
+**CLI flag** (`--registries`, repeat once per URL) — persisted to `~/.mornye/registry_settings.json`, so you only need to pass it once and it's picked up on every future run, exactly like a registry added from the GUI/Interactive wizard:
 
 ```bash
-spotiflac --registries https://example.com/my-registry.json URL ./out
+mornye --registries https://example.com/my-registry.json URL ./out
 ```
 
-**Python API** (`registries` parameter on `SpotiFLAC()` / `AsyncSpotiFLAC()`) — persisted the same way as the CLI flag:
+**Python API** (`registries` parameter on `Mornye()` / `AsyncMornye()`) — persisted the same way as the CLI flag:
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from mornye import Mornye
 
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/track/...",
     output_dir="./downloads",
     registries=["https://example.com/my-registry.json"],
@@ -47,9 +47,9 @@ SpotiFLAC(
 ```
 
 ```python
-from SpotiFLAC import AsyncSpotiFLAC
+from mornye import AsyncMornye
 
-async with AsyncSpotiFLAC(
+async with AsyncMornye(
     output_dir="./downloads",
     registries=["https://example.com/my-registry.json"],
 ) as client:
@@ -63,15 +63,15 @@ All of these feed into the same merged, deduplicated list (`extensions.registry_
 Once configured, you can also install and manage extensions directly:
 
 ```python
-from SpotiFLAC.extensions import ExtensionManager
+from mornye.extensions import ExtensionManager
 
 em = ExtensionManager()
 em.install("some-extension-id", registry_url="https://example.com/my-registry.json")
 ```
 
 **Updates.** Extensions from a configured registry are installed at startup and
-then re-checked while SpotiFLAC keeps running: the next download after
-`SPOTIFLAC_EXT_UPDATE_INTERVAL` seconds (default `3600`) fetches the registry
+then re-checked while Mornye keeps running: the next download after
+`MORNYE_EXT_UPDATE_INTERVAL` seconds (default `3600`) fetches the registry
 again and installs any newer version before it starts. An always-on `--web`
 instance — a Docker container, typically — therefore keeps its extensions
 current without a restart. Set it to `0` to check only once per process, as
@@ -81,11 +81,11 @@ startup check did (see [`--min-trust-tier`](#enforcing-trust---min-trust-tier)).
 Extensions use the `ext:` prefix and are referenced like any other provider:
 
 ```bash
-spotiflac URL ./out \
+mornye URL ./out \
   --service ext:tidal-web ext:qobuz-web
 ```
 
-> **Note:** If Node.js is not installed, SpotiFLAC automatically attempts to install it the first time a JavaScript extension is used, printing progress as it goes (`core/node_check.py`) — it never escalates privileges itself (no `sudo`/`runas` is ever added on your behalf), so on Linux it works out of the box only when already running as root, and otherwise tells you the exact command to run yourself. (The Docker image needs neither: Node.js is installed at build time, and the container runs as a non-root user.) A startup check (same idea as the ffmpeg one) also warns upfront if Node.js is missing, independent of whether the auto-install ends up working.
+> **Note:** If Node.js is not installed, Mornye automatically attempts to install it the first time a JavaScript extension is used, printing progress as it goes (`core/node_check.py`) — it never escalates privileges itself (no `sudo`/`runas` is ever added on your behalf), so on Linux it works out of the box only when already running as root, and otherwise tells you the exact command to run yourself. (The Docker image needs neither: Node.js is installed at build time, and the container runs as a non-root user.) A startup check (same idea as the ffmpeg one) also warns upfront if Node.js is missing, independent of whether the auto-install ends up working.
 >
 > Supported package managers:
 >
@@ -99,11 +99,11 @@ The maintainer does not review, endorse, or take responsibility for the content 
 
 ### Extension Discovery (Directories)
 
-Finding a registry in the first place is still on you — a **directory** is just a JSON file that lists *registries* (name, URL, description), for you to review and add yourself the normal way. Nothing is bundled here either: no default directory ships with SpotiFLAC.
+Finding a registry in the first place is still on you — a **directory** is just a JSON file that lists *registries* (name, URL, description), for you to review and add yourself the normal way. Nothing is bundled here either: no default directory ships with mornye.
 
 ```bash
-export SPOTIFLAC_REGISTRY_DIRECTORIES="https://example.com/my-directory.json"
-# or: spotiflac --registry-directories https://example.com/my-directory.json URL ./out
+export MORNYE_REGISTRY_DIRECTORIES="https://example.com/my-directory.json"
+# or: mornye --registry-directories https://example.com/my-directory.json URL ./out
 ```
 
 A directory JSON looks like:
@@ -129,9 +129,9 @@ The sha256 checksum a registry provides (see above) proves a package wasn't corr
 
 ```bash
 # Add a maintainer's public key you've decided to trust
-spotiflac --trust-key-add "some-maintainer" "<base64 Ed25519 public key>"
-spotiflac --trust-key-list
-spotiflac --trust-key-remove "some-maintainer"
+mornye --trust-key-add "some-maintainer" "<base64 Ed25519 public key>"
+mornye --trust-key-list
+mornye --trust-key-remove "some-maintainer"
 ```
 
 Or from Settings → Extensions in the GUI ("Trusted Signing Keys"), backed by `get_trusted_keys()` / `add_trusted_key()` / `remove_trusted_key()` in the Python/web API.
@@ -141,34 +141,34 @@ Once added, any installed extension's `RegistryEntry` gets a `.trust_tier` of `"
 **For registry maintainers** — generate a keypair and sign your own entries with the bundled tool:
 
 ```bash
-python -m SpotiFLAC.tools.registry_signing_cli keygen
+python -m mornye.tools.registry_signing_cli keygen
 # publish the printed public key however you publish your registry;
 # keep the private key secret
 
-python -m SpotiFLAC.tools.registry_signing_cli sign \
+python -m mornye.tools.registry_signing_cli sign \
   --private-key <base64> --id tidal-web --version 1.2.0 \
-  --sha256 <hex> --download-url https://example.com/tidal-web.spotiflac-ext
+  --sha256 <hex> --download-url https://example.com/tidal-web.mornye-ext
 # paste the printed "signature" into that entry in your registry.json
 ```
 
 ### Developing Extensions
 
-- **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`SpotiFLAC/extensions/runtime.py`) before relying on it.
-- **Python extensions** are ZIP packages (`.spotiflac-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `SpotiFLAC/extensions/python_provider.py`. See **[Writing a Python Extension](python-extensions.md)** for a full walkthrough — the `BaseProvider` contract, the `core` toolbox (`http`, `errors`, `models`, `tagger`, validation, ISRC/link helpers), a complete example provider, and packaging/registry steps.
+- **JavaScript extensions** reuse the format built for [SpotiFLAC Mobile](https://github.com/zarzet/SpotiFLAC-Mobile). Its [Extension Development Guide](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/main/docs/EXTENSION_DEVELOPMENT.md) is the closest available reference, but it was written for Mobile — some details (packaging, available runtime capabilities) may not match this project exactly. Verify against this repository's own loader (`mornye/extensions/runtime.py`) before relying on it.
+- **Python extensions** are ZIP packages (`.mornye-ext` / `.sflx`) containing a manifest and a Python module, loaded directly by `mornye/extensions/python_provider.py`. See **[Writing a Python Extension](python-extensions.md)** for a full walkthrough — the `BaseProvider` contract, the `core` toolbox (`http`, `errors`, `models`, `tagger`, validation, ISRC/link helpers), a complete example provider, and packaging/registry steps.
 
 **Scaffolding a new extension** generates a starting point that already satisfies this repo's own loader, instead of reverse-engineering the shape from an existing extension:
 
 ```bash
-spotiflac --ext-scaffold my-provider --runtime python      # or --runtime javascript
+mornye --ext-scaffold my-provider --runtime python      # or --runtime javascript
 # writes ./my-provider/{manifest.json, my_provider.py, README.md}
 ```
 
-**Validating it** — without installing into your real `~/.spotiflac/extensions` or contacting any registry — checks the manifest, confirms the entry point exists and imports/parses cleanly, and (Python) that it exposes exactly one `BaseProvider` subclass, or (JavaScript, if `node` is on `PATH`) that it's syntactically valid and calls `registerExtension(...)`:
+**Validating it** — without installing into your real `~/.mornye/extensions` or contacting any registry — checks the manifest, confirms the entry point exists and imports/parses cleanly, and (Python) that it exposes exactly one `BaseProvider` subclass, or (JavaScript, if `node` is on `PATH`) that it's syntactically valid and calls `registerExtension(...)`:
 
 ```bash
-spotiflac --ext-dry-run ./my-provider
+mornye --ext-dry-run ./my-provider
 # or against an already-packaged ZIP:
-spotiflac --ext-dry-run ./my-provider.spotiflac-ext
+mornye --ext-dry-run ./my-provider.mornye-ext
 ```
 
 If you build something reusable, consider publishing it to your own registry rather than asking the maintainer to bundle or endorse it — see [Extensions](#extensions) above for why nothing is bundled by design.
@@ -186,13 +186,13 @@ something.
 
 ```bash
 # Refuse anything the registry didn't publish a checksum for
-spotiflac --min-trust-tier checksum-only ...
+mornye --min-trust-tier checksum-only ...
 
 # Refuse anything not signed by a key you added yourself
-spotiflac --min-trust-tier signed ...
+mornye --min-trust-tier signed ...
 ```
 
-Also settable as `SPOTIFLAC_MIN_TRUST`. The three tiers, in increasing order:
+Also settable as `MORNYE_MIN_TRUST`. The three tiers, in increasing order:
 
 | Tier | Means |
 | --- | --- |
@@ -217,7 +217,7 @@ install your own extension from disk".
 
 JavaScript extensions run in their own `node` process. That process is
 started with an allowlisted environment rather than a copy of the host's:
-previously every third-party extension could read `SPOTIFLAC_WEB_TOKEN`,
+previously every third-party extension could read `MORNYE_WEB_TOKEN`,
 `AWS_SECRET_ACCESS_KEY` and everything else out of `process.env`. What it
 still gets is what a program making HTTPS requests needs — `PATH`, proxy
 settings, CA bundles. On POSIX it also runs under address-space, CPU and
@@ -226,10 +226,10 @@ file-size limits.
 If an extension genuinely needs a variable:
 
 ```bash
-export SPOTIFLAC_EXT_ENV_PASSTHROUGH="MY_PROVIDER_KEY,OTHER_VAR"
+export MORNYE_EXT_ENV_PASSTHROUGH="MY_PROVIDER_KEY,OTHER_VAR"
 ```
 
-`SPOTIFLAC_EXT_NO_SANDBOX=1` restores the old behaviour wholesale.
+`MORNYE_EXT_NO_SANDBOX=1` restores the old behaviour wholesale.
 
 **This is not a security boundary.** The extension still runs as the same OS
 user, can still open sockets and write files. It removes an accidental
@@ -237,5 +237,5 @@ handover of credentials and caps obvious resource exhaustion; it does not
 contain a hostile extension. Real isolation needs a container or a separate
 user account.
 
-Python extensions get none of this: they are imported into the SpotiFLAC
+Python extensions get none of this: they are imported into the Mornye
 process, so they share its memory and environment by construction.

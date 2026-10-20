@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from SpotiFLAC.core import profiles
+from mornye.core import profiles
 
 
 def test_save_and_list_profiles(tmp_path, monkeypatch):

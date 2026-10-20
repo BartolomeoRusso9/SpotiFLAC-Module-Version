@@ -13,9 +13,9 @@ import base64
 
 import pytest
 
-from SpotiFLAC.core.errors import NetworkError
-from SpotiFLAC.core.http import AsyncHttpClient
-from SpotiFLAC.core.loop_runner import run_sync
+from mornye.core.errors import NetworkError
+from mornye.core.http import AsyncHttpClient
+from mornye.core.loop_runner import run_sync
 
 pytest.importorskip("aiofiles")
 

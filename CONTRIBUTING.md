@@ -1,4 +1,4 @@
-# Contributing to SpotiFLAC
+# Contributing to Mornye
 
 Thanks for your interest in contributing! Follow these quick steps:
 

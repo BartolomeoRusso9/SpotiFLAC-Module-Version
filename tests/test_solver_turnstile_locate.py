@@ -18,7 +18,7 @@ from pydoll.browser.tab import Tab
 from pydoll.elements.web_element import WebElement
 from pydoll.exceptions import ElementNotFound
 
-from SpotiFLAC.core import solver
+from mornye.core import solver
 
 WIDGET_HTML = '<iframe src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/turnstile"></iframe>'
 IFRAME_BOUNDS = {"x": 485.5, "y": 437.1875, "width": 300, "height": 65}

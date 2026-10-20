@@ -24,9 +24,9 @@ from time import time
 
 import pytest
 
-from SpotiFLAC.core import signed_session_desktop as ssd
-from SpotiFLAC.core import signed_session_mobile as ssm
-from SpotiFLAC.extensions.runtime import JSRuntime
+from mornye.core import signed_session_desktop as ssd
+from mornye.core import signed_session_mobile as ssm
+from mornye.extensions.runtime import JSRuntime
 
 # ---------------------------------------------------------------------------
 # signed session (mobile): perform_signed_fetch
@@ -83,7 +83,7 @@ LIMITED = (
 
 
 def test_a_429_is_logged_with_the_retry_after_header(tmp_path, caplog) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(tmp_path, _Response(429, "", {"Retry-After": "30"}))
 
     assert "HTTP 429 for POST /dl/tid — retry after 30s" in caplog.text
@@ -93,7 +93,7 @@ def test_a_429_is_logged_with_the_retry_after_header(tmp_path, caplog) -> None:
 def test_the_wait_comes_from_the_envelope_when_there_is_no_header(
     tmp_path, caplog
 ) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(tmp_path, _Response(429, LIMITED), path="/tickets")
 
     assert "HTTP 429 for POST /tickets — retry after 900s" in caplog.text
@@ -103,7 +103,7 @@ def test_the_wait_comes_from_the_envelope_when_there_is_no_header(
 def test_an_http_date_header_is_turned_into_seconds(tmp_path, caplog) -> None:
     """The date form of Retry-After, which the Node bridge has always read."""
     header = formatdate(time() + 600, usegmt=True)
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(tmp_path, _Response(429, "", {"Retry-After": header}))
 
     assert 590 <= result["retryAfterSeconds"] <= 600
@@ -113,7 +113,7 @@ def test_an_http_date_header_is_turned_into_seconds(tmp_path, caplog) -> None:
 def test_a_past_http_date_falls_back_to_the_envelope(tmp_path, caplog) -> None:
     """A wait already over is no wait — the envelope still has one."""
     header = formatdate(time() - 600, usegmt=True)
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(tmp_path, _Response(429, LIMITED, {"Retry-After": header}))
 
     assert "HTTP 429 for POST /dl/tid — retry after 900s" in caplog.text
@@ -121,14 +121,14 @@ def test_a_past_http_date_falls_back_to_the_envelope(tmp_path, caplog) -> None:
 
 
 def test_a_429_without_any_wait_says_so(tmp_path, caplog) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         _fetch(tmp_path, _Response(429, "slow down"))
 
     assert "HTTP 429 for POST /dl/tid — no Retry-After" in caplog.text
 
 
 def test_other_refusals_add_no_rate_limit_line(tmp_path, caplog) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(tmp_path, _Response(409, LIMITED, {"Retry-After": "4"}))
 
     assert "HTTP 429" not in caplog.text
@@ -242,7 +242,7 @@ def bridge(tmp_path: Path, monkeypatch):
     if shutil.which("node") is None:
         pytest.skip("needs Node to exercise the real bridge")
     # The test server is on loopback, which the extension network guard refuses.
-    monkeypatch.setenv("SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK", "1")
+    monkeypatch.setenv("MORNYE_EXT_ALLOW_PRIVATE_NETWORK", "1")
     ext = tmp_path / "index.js"
     ext.write_text(PROBE)
     rt = JSRuntime(ext_path=ext)
@@ -261,7 +261,7 @@ def test_the_bridge_logs_a_429_with_its_retry_after(
     bridge, limited_server, caplog
 ) -> None:
     host = limited_server.removeprefix("http://")
-    with caplog.at_level("WARNING", logger="SpotiFLAC.extensions.runtime"):
+    with caplog.at_level("WARNING", logger="mornye.extensions.runtime"):
         res = bridge(f"http.get({json.dumps(limited_server + '/seconds')})")
 
     assert res["status"] == 429  # the extension still gets the response
@@ -273,7 +273,7 @@ def test_the_bridge_logs_a_429_with_its_retry_after(
 def test_an_http_date_retry_after_is_turned_into_seconds(
     bridge, limited_server, caplog
 ) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.extensions.runtime"):
+    with caplog.at_level("WARNING", logger="mornye.extensions.runtime"):
         bridge(
             f"http.request({json.dumps(limited_server + '/date')}, {{method: 'GET'}})"
         )
@@ -286,7 +286,7 @@ def test_an_http_date_retry_after_is_turned_into_seconds(
 def test_a_429_without_retry_after_is_still_logged(
     bridge, limited_server, caplog
 ) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.extensions.runtime"):
+    with caplog.at_level("WARNING", logger="mornye.extensions.runtime"):
         bridge(f"http.get({json.dumps(limited_server + '/none')})")
 
     [line] = _warnings(caplog)
@@ -294,7 +294,7 @@ def test_a_429_without_retry_after_is_still_logged(
 
 
 def test_a_successful_request_logs_nothing(bridge, limited_server, caplog) -> None:
-    with caplog.at_level("WARNING", logger="SpotiFLAC.extensions.runtime"):
+    with caplog.at_level("WARNING", logger="mornye.extensions.runtime"):
         res = bridge(f"http.get({json.dumps(limited_server + '/fine')})")
 
     assert res["status"] == 200

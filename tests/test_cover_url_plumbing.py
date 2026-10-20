@@ -16,7 +16,7 @@ import functools
 
 import pytest
 
-from SpotiFLAC.core.progress import DownloadManager
+from mornye.core.progress import DownloadManager
 
 
 def _in_a_loop(test):
@@ -29,7 +29,7 @@ def _in_a_loop(test):
 
 @pytest.fixture(autouse=True)
 def _isolate_cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "cache"))
 
 
 @_in_a_loop
@@ -68,7 +68,7 @@ async def test_a_caller_that_names_no_cover_still_works():
 
 def test_the_downloader_passes_the_track_cover(monkeypatch) -> None:
     """The one call site — a cover dropped here is a cover never seen."""
-    import SpotiFLAC.downloader as downloader_module
+    import mornye.downloader as downloader_module
 
     seen: list[tuple] = []
 
@@ -92,8 +92,8 @@ def test_the_downloader_passes_the_track_cover(monkeypatch) -> None:
         def model_copy(self, update):
             return self
 
-    downloader = downloader_module.SpotiflacDownloader.__new__(
-        downloader_module.SpotiflacDownloader
+    downloader = downloader_module.MornyeDownloader.__new__(
+        downloader_module.MornyeDownloader
     )
     asyncio.run(downloader._register_queue_async([_Track()]))  # type: ignore[list-item]
 

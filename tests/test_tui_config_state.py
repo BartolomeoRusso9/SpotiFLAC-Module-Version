@@ -24,13 +24,13 @@ import pathlib
 
 import pytest
 
-from SpotiFLAC.tui.config_state import (
+from mornye.tui.config_state import (
     DEFAULT_ENRICH_PROVIDERS,
     DEFAULT_LYRICS_PROVIDERS,
     ConfigState,
 )
 
-_ROOT = pathlib.Path(__file__).resolve().parent.parent / "SpotiFLAC"
+_ROOT = pathlib.Path(__file__).resolve().parent.parent / "Mornye"
 
 
 def _cfg_keys_in(path: pathlib.Path, *, within: range | None = None) -> set[str]:
@@ -257,13 +257,13 @@ def test_a_fresh_state_says_exactly_what_it_is_missing() -> None:
 
 
 def test_downloads_land_in_music_spotiflac_unless_told_otherwise() -> None:
-    from SpotiFLAC.core.paths import default_download_dir
+    from mornye.core.paths import default_download_dir
 
     assert ConfigState().output_dir == default_download_dir()
-    # os.path.join, not a literal "Music/SpotiFLAC": the separator is the
+    # os.path.join, not a literal "Music/Mornye": the separator is the
     # platform's, and on Windows this read the right path as the wrong one.
     landing = ConfigState().to_cfg()["output_dir"]
-    assert landing.endswith(os.path.join("Music", "SpotiFLAC"))
+    assert landing.endswith(os.path.join("Music", "Mornye"))
 
 
 def test_a_blank_folder_is_still_reported_as_missing() -> None:
@@ -278,7 +278,7 @@ def test_a_blank_folder_is_still_reported_as_missing() -> None:
 
 def test_only_the_three_meaningful_tiers_survive() -> None:
     """HI_RES, HIGH and LOW are not choices worth offering here."""
-    from SpotiFLAC.tui.config_state import QUALITY_TIERS
+    from mornye.tui.config_state import QUALITY_TIERS
 
     assert QUALITY_TIERS == ("LOSSLESS", "HI_RES_LOSSLESS", "DOLBY_ATMOS")
 
@@ -306,7 +306,7 @@ def test_atmos_needs_tidal_to_mean_anything() -> None:
 
 def test_the_engine_already_downgrades_atmos_per_provider() -> None:
     """The state's rule must agree with what the downloader does anyway."""
-    from SpotiFLAC.core.quality import quality_for_provider
+    from mornye.core.quality import quality_for_provider
 
     assert quality_for_provider("tidal", "DOLBY_ATMOS") == "DOLBY_ATMOS"
     assert quality_for_provider("deezer", "DOLBY_ATMOS") == "FLAC"
@@ -378,7 +378,7 @@ def test_the_cli_preview_reflects_the_state() -> None:
     )
     command = state.cli_command()
 
-    assert command.startswith("spotiflac")
+    assert command.startswith("mornye")
     assert "--first-artist-only" in command
 
     state.first_artist_only = False

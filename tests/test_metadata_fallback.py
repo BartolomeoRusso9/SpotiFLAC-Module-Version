@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-import SpotiFLAC.downloader as downloader_module
-from SpotiFLAC.core.errors import ErrorKind, SpotiflacError
-from SpotiFLAC.core.metadata_fallback import (
+import mornye.downloader as downloader_module
+from mornye.core.errors import ErrorKind, MornyeError
+from mornye.core.metadata_fallback import (
     fallback_extension_for,
     get_url_with_fallback,
     track_from_extension,
 )
-from SpotiFLAC.extensions.manager import InstalledExtension
+from mornye.extensions.manager import InstalledExtension
 
 SPOTIFY_ALBUM = "https://open.spotify.com/album/5V8n6fqyAPxvFTibPhQVcp"
 APPLE_ALBUM = "https://music.apple.com/us/album/palette/1229073300"
@@ -138,7 +138,7 @@ def test_a_working_built_in_client_is_all_that_is_asked(native) -> None:
 
 
 def test_a_failing_spotify_client_hands_over_to_spotify_web(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.AUTH_FAILED, "token refused")
+    native["outcome"] = MornyeError(ErrorKind.AUTH_FAILED, "token refused")
     provider = _Provider(ALBUM_RESPONSE)
 
     name, tracks, cover, meta = _run(SPOTIFY_ALBUM, provider=provider)
@@ -175,7 +175,7 @@ def test_an_empty_answer_is_also_a_reason_to_ask(native) -> None:
 
 
 def test_apple_music_tracks_keep_the_built_in_id_prefix(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.NETWORK_ERROR, "timeout")
+    native["outcome"] = MornyeError(ErrorKind.NETWORK_ERROR, "timeout")
     response = {
         "success": True,
         "type": "track",
@@ -192,33 +192,33 @@ def test_apple_music_tracks_keep_the_built_in_id_prefix(native) -> None:
 
 
 def test_a_malformed_link_is_not_sent_anywhere_else(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.INVALID_URL, "not a Spotify link")
+    native["outcome"] = MornyeError(ErrorKind.INVALID_URL, "not a Spotify link")
     manager = _Manager(SPOTIFY_WEB)
-    with pytest.raises(SpotiflacError) as err:
+    with pytest.raises(MornyeError) as err:
         _run(SPOTIFY_ALBUM, manager=manager)
     assert err.value.kind == ErrorKind.INVALID_URL
     assert manager.listed == 0
 
 
 def test_with_no_extension_the_built_in_error_is_what_the_caller_sees(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.AUTH_FAILED, "token refused")
-    with pytest.raises(SpotiflacError, match="token refused"):
+    native["outcome"] = MornyeError(ErrorKind.AUTH_FAILED, "token refused")
+    with pytest.raises(MornyeError, match="token refused"):
         _run(SPOTIFY_ALBUM, manager=_Manager(APPLE_MUSIC))
 
 
 def test_when_the_extension_fails_too_the_first_error_wins(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.AUTH_FAILED, "token refused")
+    native["outcome"] = MornyeError(ErrorKind.AUTH_FAILED, "token refused")
     provider = _Provider(
         {"success": False, "error": "utils.hmacSHA1 is not a function"}
     )
-    with pytest.raises(SpotiflacError, match="token refused"):
+    with pytest.raises(MornyeError, match="token refused"):
         _run(SPOTIFY_ALBUM, provider=provider)
 
 
 def test_services_without_a_stand_in_are_not_looked_up(native) -> None:
-    native["outcome"] = SpotiflacError(ErrorKind.NETWORK_ERROR, "tidal down")
+    native["outcome"] = MornyeError(ErrorKind.NETWORK_ERROR, "tidal down")
     manager = _Manager(SPOTIFY_WEB)
-    with pytest.raises(SpotiflacError, match="tidal down"):
+    with pytest.raises(MornyeError, match="tidal down"):
         _run("https://tidal.com/browse/album/1", manager=manager)
     assert manager.listed == 0
 
@@ -262,8 +262,8 @@ def test_external_links_given_as_a_map_still_become_a_link() -> None:
 def test_a_metadata_extension_under_a_service_alias_is_not_used_to_download(
     monkeypatch,
 ) -> None:
-    import SpotiFLAC.extensions.manager as manager_module
-    import SpotiFLAC.extensions.provider as provider_module
+    import mornye.extensions.manager as manager_module
+    import mornye.extensions.provider as provider_module
 
     built = []
 

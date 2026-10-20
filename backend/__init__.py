@@ -1,8 +1,8 @@
 """Compatibility shim used by the test-suite.
-Some tests import `backend.SpotiFLAC`; expose the main factory
+Some tests import `backend.Mornye`; expose the main factory
 from the real package so tests run without modifying test code.
 """
 
-from SpotiFLAC import SpotiFLAC
+from mornye import Mornye
 
-__all__ = ["SpotiFLAC"]
+__all__ = ["Mornye"]

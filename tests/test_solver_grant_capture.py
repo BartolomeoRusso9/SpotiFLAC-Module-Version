@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from SpotiFLAC.core import solver
+from mornye.core import solver
 
 
 def test_captured_grant_is_success_without_turnstile_token(monkeypatch) -> None:

@@ -8,7 +8,7 @@
 
 ## API Reference
 
-### `SpotiFLAC()` Parameters
+### `Mornye()` Parameters
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -16,7 +16,7 @@
 | `output_dir` | `str` | Required | The destination directory path where the audio files will be saved. |
 | `output_path` | `str` | `None` | Exact destination file path for single track downloads. Overrides `output_dir` + `filename_format`. Automatically ignored for albums, playlists and artist discographies. |
 | `services` | `list` | `["ext:tidal-web"]` | Extensions to use and their priority order, as `ext:<id>` (or a legacy alias — see [Extensions](extensions.md#extensions)). Each `id` must correspond to an extension you have already installed; nothing is bundled or installed automatically. |
-| `registries` | `list` | `None` | One or more extension-registry JSON URLs to add before the run, as an alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json` on first use, so subsequent runs (CLI, GUI, or Python) pick it up automatically without passing it again — see [Extensions](extensions.md#extensions). |
+| `registries` | `list` | `None` | One or more extension-registry JSON URLs to add before the run, as an alternative to `MORNYE_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.mornye/registry_settings.json` on first use, so subsequent runs (CLI, GUI, or Python) pick it up automatically without passing it again — see [Extensions](extensions.md#extensions). |
 | `filename_format` | `str` | `"{title} - {artist}"` | Format for naming downloaded files. See placeholders below. |
 | `use_track_numbers` | `bool` | `False` | Prefixes the filename with the track number. |
 | `use_album_track_numbers` | `bool` | `False` | Uses the track's original album number instead of the download queue position. |
@@ -28,7 +28,7 @@
 | `include_featuring` | `bool` | `False` | When downloading an artist discography, also includes tracks where the artist appears as a featured artist. |
 | `max_concurrent_downloads` | `int` | `2` | How many tracks to download in parallel. |
 | `tidal_custom_api` | `str` | `None` | Optional setting forwarded to the installed `tidal-web`-family extension, if it supports it. Has no effect on its own — see [Passing Settings to an Extension](configuration.md#passing-settings-to-an-extension-eg-a-self-hosted-api-instance). |
-| `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. SpotiFLAC then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
+| `timeout_s` | `int` | `None` | Per-track download timeout in seconds. If a single track download does not complete within this time, the process is terminated and the track is marked as failed. Mornye then moves on to the next extension or retry. Set to `None` (default) to disable the timeout. |
 | `loop` | `int` | `None` | Duration in minutes to keep retrying permanently failed tracks after a full session completes. |
 | `track_max_retries` | `int` | `0` | Extra download attempts per track when all extensions fail on the first try. Each retry cycles through all configured extensions again with exponential backoff (2 s → 4 s → 8 s …, capped at 30 s). |
 | `quality` | `str` | `"LOSSLESS"` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. `DOLBY_ATMOS` is also accepted but is Tidal-exclusive — any other provider falls back to `HI_RES_LOSSLESS` instead. Legacy provider-specific values are accepted and normalized. |
@@ -77,7 +77,7 @@ When customizing the `filename_format` string, you can use the following dynamic
 **Examples:**
 
 ```python
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/track/...",
     output_dir="./downloads",
     services=["ext:tidal-web"],
@@ -86,7 +86,7 @@ SpotiFLAC(
 )
 
 # Using platform and ID in the filename (flat):
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/playlist/...",
     output_dir="./downloads",
     filename_format="{platform}_{album}_{title}",
@@ -107,7 +107,7 @@ The function must return a **filename** (without directory or extension — thos
 **Example — use ISRC if available, fall back to platform_id:**
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from mornye import Mornye
 
 def my_filename_logic(metadata, platform, native_id, **kwargs):
     """
@@ -122,7 +122,7 @@ def my_filename_logic(metadata, platform, native_id, **kwargs):
     
     return metadata.title
 
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/album/...",
     output_dir="./downloads",
     services=["ext:tidal-web", "ext:soundcloud-web"],
@@ -133,7 +133,7 @@ SpotiFLAC(
 **Example — include platform and year in filename (flat):**
 
 ```python
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/playlist/...",
     output_dir="./downloads",
     filename_format=lambda metadata, platform, native_id, **kw: (
@@ -147,7 +147,7 @@ SpotiFLAC(
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--service` | `-s` | `ext:tidal-web` | One or more extensions in priority order, as `ext:<id>` (or a legacy alias resolved to an installed extension — see [Extensions](extensions.md#extensions)). |
-| `--registries` | | `None` | An extension-registry JSON URL to add before running; repeat the flag for each one. Alternative to `SPOTIFLAC_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.spotiflac/registry_settings.json`, so you only need to pass it once — see [Extensions](extensions.md#extensions). |
+| `--registries` | | `None` | An extension-registry JSON URL to add before running; repeat the flag for each one. Alternative to `MORNYE_REGISTRIES` or a `.env` file. Must be `https://`. Persisted to `~/.mornye/registry_settings.json`, so you only need to pass it once — see [Extensions](extensions.md#extensions). |
 | `--filename-format` | `-f` | `{title} - {artist}` | Filename template with placeholders. |
 | `--output-path` | `-o` | `None` | Exact output file path for single track downloads. Ignored for albums, playlists and discographies. |
 | `--quality` | `-q` | `LOSSLESS` | Requested profile: `LOSSLESS` or `HI_RES_LOSSLESS`. `DOLBY_ATMOS` is also accepted but is Tidal-exclusive — any other provider falls back to `HI_RES_LOSSLESS` instead. Legacy provider-specific values are accepted and normalized. |
@@ -164,7 +164,7 @@ SpotiFLAC(
 | `--include-featuring` | | `False` | Include tracks where the artist appears as a featured artist. Only applies to artist/discography URLs. |
 | `--qobuz-local-api` | | `None` | Optional setting forwarded to the installed Qobuz extension, if it supports it. |
 | `--tidal-api` | | `None` | Optional setting forwarded to the installed Tidal extension, if it supports it. |
-| `--timeout` | | `180` | Maximum seconds allowed for each provider attempt. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then SpotiFLAC moves to the next extension or retry. |
+| `--timeout` | | `180` | Maximum seconds allowed for each provider attempt. If a track download stalls or takes longer than this limit, it is forcibly terminated and marked as failed, then Mornye moves to the next extension or retry. |
 | `--loop` | `-l` | `None` | Keep retrying permanently failed tracks every N minutes. |
 | `--watch` | | `None` | Re-run this exact command every N minutes, forever, instead of exiting after one pass. See [Watch Mode](configuration.md#watch-mode-keep-syncing-on-an-interval). |
 | `--retries` | | `0` | Extra per-track download attempts on failure. Cycles through all configured extensions with exponential backoff. |
@@ -198,14 +198,14 @@ SpotiFLAC(
 | `--web` | | `False` | Launch the same GUI as a local web server instead of a native window. See [Web Mode](quick-start.md#web-mode-same-gui-in-your-browser). |
 | `--host` | | `127.0.0.1` | Host to bind `--web` to. Only change this deliberately — see the security note under [Web Mode](quick-start.md#web-mode-same-gui-in-your-browser). |
 | `--port` | | `8000` | Port to bind `--web` to. |
-| `--web-token` | | `None` | Shared secret required on every `--web` request. Falls back to `SPOTIFLAC_WEB_TOKEN`. See [Authentication](quick-start.md#authentication---web-token). |
+| `--web-token` | | `None` | Shared secret required on every `--web` request. Falls back to `MORNYE_WEB_TOKEN`. See [Authentication](quick-start.md#authentication---web-token). |
 | `--web-multiuser` | | `False` | Require per-account login for `--web` instead of/alongside `--web-token`. See [Multi-user mode](quick-start.md#multi-user-mode---web-multiuser). |
 | `--web-user-add` | | | Create a `--web-multiuser` account: `--web-user-add USERNAME PASSWORD`. |
 | `--web-user-remove` | | | Delete a `--web-multiuser` account by username. |
 | `--web-user-list` | | | List configured `--web-multiuser` usernames. |
 | `--tui` | | `False` | Launch the terminal UI, the guided mode. See [Terminal UI](tui.md). |
 | `--interactive` | | `False` | **Deprecated** — an alias for `--tui`, with a warning. The step-by-step wizard it used to open has been removed. |
-| `--registry-directories` | | `None` | A directory JSON URL to add before running (lists registries, not extensions — repeat once per URL). Alternative to `SPOTIFLAC_REGISTRY_DIRECTORIES`. See [Extension Discovery](extensions.md#extension-discovery-directories). |
+| `--registry-directories` | | `None` | A directory JSON URL to add before running (lists registries, not extensions — repeat once per URL). Alternative to `MORNYE_REGISTRY_DIRECTORIES`. See [Extension Discovery](extensions.md#extension-discovery-directories). |
 | `--trust-key-add` | | | Trust a registry-signing public key: `--trust-key-add NAME PUBLIC_KEY_B64`. See [Registry Trust](extensions.md#registry-trust-signed-extensions). |
 | `--trust-key-remove` | | | Remove a trusted key by name. |
 | `--trust-key-list` | | | List trusted key names/public keys. |

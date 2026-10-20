@@ -15,8 +15,8 @@ import logging
 
 import pytest
 
-from SpotiFLAC.core import console, output_sink, progress
-from SpotiFLAC.core.output_sink import (
+from mornye.core import console, output_sink, progress
+from mornye.core.output_sink import (
     CallbackLogHandler,
     CallbackSink,
     emit,
@@ -24,7 +24,7 @@ from SpotiFLAC.core.output_sink import (
     set_output_sink,
     sink_active,
 )
-from SpotiFLAC.core.progress import ProgressManager, progress_bars_enabled
+from mornye.core.progress import ProgressManager, progress_bars_enabled
 
 
 class RecordingSink:
@@ -130,7 +130,7 @@ def test_safe_writers_route_through_the_sink(capfd) -> None:
 
 
 def test_a_sink_outranks_the_progress_bars_env_override(monkeypatch) -> None:
-    monkeypatch.setenv("SPOTIFLAC_PROGRESS_BARS", "1")
+    monkeypatch.setenv("MORNYE_PROGRESS_BARS", "1")
     assert progress_bars_enabled() is True
 
     with output_sink_ctx(RecordingSink()):
@@ -169,7 +169,7 @@ def test_a_simulated_download_writes_nothing_to_the_terminal(capfd) -> None:
             console.print_run_header(2, ["deezer"], "FLAC", "/tmp/out", 1)
             console.print_track_header(1, 2, "Song", "Artist", "Album")
             progress.safe_tqdm_write("  merging segments...")
-            logging.getLogger("SpotiFLAC.test").error("something went wrong")
+            logging.getLogger("mornye.test").error("something went wrong")
             print("a stray print nobody routed")
 
             ProgressManager.initialize_master_bar(2, description="Progress")
@@ -221,14 +221,14 @@ def test_a_ui_with_its_own_log_handler_sees_each_line_once() -> None:
         with output_sink_ctx(sink):
             progress.install_console_interception()
             try:
-                logging.getLogger("SpotiFLAC.downloader").info("[amazon] one track")
+                logging.getLogger("mornye.downloader").info("[amazon] one track")
             finally:
                 progress.uninstall_console_interception()
     finally:
         root.removeHandler(ui)
         root.setLevel(previous_level)
 
-    assert lines == [("ui", "SpotiFLAC.downloader: [amazon] one track")]
+    assert lines == [("ui", "mornye.downloader: [amazon] one track")]
     assert "one track" not in sink.text
 
 
@@ -237,7 +237,7 @@ def test_callback_log_handler_buckets_severity() -> None:
     handler = CallbackLogHandler(lambda msg, severity: seen.append((msg, severity)))
     handler.setFormatter(logging.Formatter("%(message)s"))
 
-    logger = logging.getLogger("SpotiFLAC.test.callback")
+    logger = logging.getLogger("mornye.test.callback")
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -260,7 +260,7 @@ def test_callback_log_handler_swallows_a_broken_callback() -> None:
     handler = CallbackLogHandler(explode)
     handler.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        "SpotiFLAC.test",
+        "mornye.test",
         logging.ERROR,
         __file__,
         1,
@@ -282,10 +282,10 @@ def test_set_output_sink_returns_the_previous_one() -> None:
 def test_a_host_app_with_rich_logging_sees_each_line_once(capfd) -> None:
     """Library mode does not render over the host application's own logging.
 
-    An app that embeds AsyncSpotiFLAC and configures `rich.logging.
+    An app that embeds AsyncMornye and configures `rich.logging.
     RichHandler` on the root logger used to get every warning twice for the
     length of a download: once rendered by Rich, once as
-    "[WARNING] SpotiFLAC.core.signed_session_mobile: ...". A RichHandler is
+    "[WARNING] mornye.core.signed_session_mobile: ...". A RichHandler is
     a bare `logging.Handler`, not a StreamHandler, so the suspension pass
     walked straight past it and then added a tqdm handler on the same root
     it was still attached to.
@@ -293,7 +293,7 @@ def test_a_host_app_with_rich_logging_sees_each_line_once(capfd) -> None:
     from rich.logging import RichHandler
 
     root = logging.getLogger()
-    package = logging.getLogger("SpotiFLAC")
+    package = logging.getLogger("mornye")
     host = RichHandler(show_path=False, show_time=False, markup=False)
     host.setLevel(logging.INFO)
 
@@ -303,7 +303,7 @@ def test_a_host_app_with_rich_logging_sees_each_line_once(capfd) -> None:
     try:
         progress.install_console_interception()
         try:
-            logging.getLogger("SpotiFLAC.core.signed_session_mobile").warning(
+            logging.getLogger("mornye.core.signed_session_mobile").warning(
                 "ticket not returned",
             )
         finally:
@@ -317,7 +317,7 @@ def test_a_host_app_with_rich_logging_sees_each_line_once(capfd) -> None:
     printed = captured.out + captured.err
     assert printed.count("ticket not returned") == 1
     # The one that survived is the host's, not ours.
-    assert "[WARNING] SpotiFLAC" not in printed
+    assert "[WARNING] Mornye" not in printed
 
 
 def test_a_host_log_file_keeps_receiving_records_during_a_download(tmp_path) -> None:
@@ -341,7 +341,7 @@ def test_a_host_log_file_keeps_receiving_records_during_a_download(tmp_path) -> 
         progress.install_console_interception()
         try:
             assert host in root.handlers
-            logging.getLogger("SpotiFLAC.downloader").info("one track")
+            logging.getLogger("mornye.downloader").info("one track")
         finally:
             progress.uninstall_console_interception()
     finally:
@@ -358,12 +358,12 @@ def test_the_stand_in_handler_does_not_filter_more_than_the_one_it_replaced(
     """`log_level=INFO` has to mean INFO during the download too.
 
     The tqdm handler used to copy `root.level` onto itself. A library caller
-    raises the "SpotiFLAC" logger, not the root one, so the stand-in came up
+    raises the "Mornye" logger, not the root one, so the stand-in came up
     at WARNING and swallowed every INFO record for exactly as long as the
     download lasted — while the console handler it had just suspended
     carried no level at all.
     """
-    package = logging.getLogger("SpotiFLAC")
+    package = logging.getLogger("mornye")
     root = logging.getLogger()
     host = logging.StreamHandler()
 
@@ -378,7 +378,7 @@ def test_the_stand_in_handler_does_not_filter_more_than_the_one_it_replaced(
     try:
         progress.install_console_interception()
         try:
-            logging.getLogger("SpotiFLAC.downloader").info("one track")
+            logging.getLogger("mornye.downloader").info("one track")
         finally:
             progress.uninstall_console_interception()
     finally:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from typing import Any
 
-from SpotiFLAC.core.models import TrackMetadata, build_filename, split_credit
+from mornye.core.models import TrackMetadata, build_filename, split_credit
 
 CHROMAKOPIA: dict[str, Any] = {
     "id": "6jbYpRPTEFl1HFKHk1IC0m",

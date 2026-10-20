@@ -8,7 +8,7 @@ it just quietly turned off everything downstream that keys on an ISRC:
   - local_processor._with_musicbrainz_tags() returns early, so a re-tag
     writes none of MusicBrainz's ~25 tags
   - local_matcher's identity check cannot recognise its own candidates
-  - files SpotiFLAC writes carry no ISRC for the next run to match on
+  - files Mornye writes carry no ISRC for the next run to match on
 
 A silent regression of exactly that shape is what these tests exist to
 catch, so they assert the wiring rather than the network.
@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.spotify_metadata import SpotifyMetadataClient
+from mornye.core.spotify_metadata import SpotifyMetadataClient
 
 ISRC = "USUM70504267"
 
@@ -72,7 +72,7 @@ def _patch_query(monkeypatch, client, payload) -> None:
         return payload
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.spotify_metadata.asyncio.to_thread",
+        "mornye.core.spotify_metadata.asyncio.to_thread",
         _make_to_thread(client),
     )
     client.web_client.query = lambda _p: payload  # type: ignore[attr-defined]
@@ -114,9 +114,9 @@ def test_musicbrainz_enrichment_is_gated_on_the_isrc() -> None:
     """Why the wiring above matters: this gate is why a re-tag wrote none of
     MusicBrainz's tags while every track carried isrc="".
     """
-    from SpotiFLAC.core.local_processor import _with_musicbrainz_tags
-    from SpotiFLAC.core.models import TrackMetadata
-    from SpotiFLAC.core.tagger import EmbedOptions
+    from mornye.core.local_processor import _with_musicbrainz_tags
+    from mornye.core.models import TrackMetadata
+    from mornye.core.tagger import EmbedOptions
 
     without = TrackMetadata(
         id="0" * 22, title="t", artists="a", album="", album_artist="a", isrc=""
@@ -130,6 +130,6 @@ def test_find_existing_track_cannot_use_a_missing_isrc(isrc) -> None:
     """The download-time "do I already have this?" check tries the ISRC
     first. With an empty one it silently degrades to text matching.
     """
-    from SpotiFLAC.core.isrc_utils import normalize_isrc
+    from mornye.core.isrc_utils import normalize_isrc
 
     assert normalize_isrc(isrc) == ""

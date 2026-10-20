@@ -2,8 +2,8 @@ import argparse
 import json
 import logging
 
-from SpotiFLAC.core.profiles import ProfileConfig
-from SpotiFLAC.launcher import (
+from mornye.core.profiles import ProfileConfig
+from mornye.launcher import (
     _resolve_log_level,
     _split_positionals,
     load_config,
@@ -58,7 +58,7 @@ def test_parse_args_uses_profile_defaults(monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
         [
-            "spotiflac",
+            "mornye",
             "--quality",
             "HI_RES_LOSSLESS",
             "--m3u",
@@ -110,7 +110,7 @@ def test_load_config_validates_profile_shape(tmp_path, monkeypatch):
 
 
 def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tmp_path):
-    from SpotiFLAC.extensions.provider import JSExtensionProvider
+    from mornye.extensions.provider import JSExtensionProvider
 
     class DummyExtension:
         name = "tidal-web"
@@ -132,9 +132,9 @@ def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tm
             assert ext_id == "tidal-web"
             return {}
 
-    monkeypatch.setattr("SpotiFLAC.extensions.provider.ExtensionManager", DummyManager)
+    monkeypatch.setattr("mornye.extensions.provider.ExtensionManager", DummyManager)
     monkeypatch.setattr(
-        "SpotiFLAC.extensions.provider.signed_session_client", lambda manifest: None
+        "mornye.extensions.provider.signed_session_client", lambda manifest: None
     )
 
     provider = JSExtensionProvider("tidal-web")
@@ -146,7 +146,7 @@ def test_js_extension_provider_initializes_base_validation_cache(monkeypatch, tm
 def test_service_options_are_deduplicated_from_installed_extensions(
     monkeypatch,
 ):
-    from SpotiFLAC.extensions.catalog import installed_service_ids
+    from mornye.extensions.catalog import installed_service_ids
 
     class DummyExt:
         def __init__(self, name, is_download_provider=True):
@@ -169,7 +169,7 @@ def test_service_options_are_deduplicated_from_installed_extensions(
     # Patched where the discovery actually lives: every menu — the TUI, the
     # GUI's Settings list, and the wizard while it lasts — reads
     # extensions/catalog.installed_download_services().
-    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
+    monkeypatch.setattr("mornye.extensions.catalog.ExtensionManager", DummyManager)
 
     assert installed_service_ids() == ["qobuz", "soundcloud", "tidal"]
 
@@ -191,14 +191,14 @@ def test_the_tui_says_so_when_no_download_provider_is_installed(monkeypatch):
         def list_installed(self):
             return []
 
-    monkeypatch.setattr("SpotiFLAC.extensions.catalog.ExtensionManager", DummyManager)
+    monkeypatch.setattr("mornye.extensions.catalog.ExtensionManager", DummyManager)
 
-    from SpotiFLAC.tui.app import SpotiFLACTui
-    from SpotiFLAC.tui.config_state import ConfigState
+    from mornye.tui.app import MornyeTui
+    from mornye.tui.config_state import ConfigState
 
     async def _shown():
         state = ConfigState(url="https://open.spotify.com/track/x", output_dir="/tmp/o")
-        async with SpotiFLACTui(state).run_test() as pilot:
+        async with MornyeTui(state).run_test() as pilot:
             for _ in range(4):
                 await pilot.pause()
             notice = pilot.app.query_one("#no-providers")

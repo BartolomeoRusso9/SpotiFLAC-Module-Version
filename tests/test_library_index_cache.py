@@ -21,7 +21,7 @@ import subprocess
 
 import pytest
 
-from SpotiFLAC.core.library_index_cache import (
+from mornye.core.library_index_cache import (
     CachedTags,
     LibraryIndexCache,
     cache_path_for,
@@ -35,7 +35,7 @@ def library(tmp_path, monkeypatch):
         pytest.skip("needs ffmpeg to make a tagged FLAC")
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.library_index_cache._CACHE_DIR", tmp_path / "cache"
+        "mornye.core.library_index_cache._CACHE_DIR", tmp_path / "cache"
     )
     music = tmp_path / "music"
     music.mkdir()
@@ -139,7 +139,7 @@ def test_an_unwritable_cache_does_not_raise(library, monkeypatch) -> None:
     cache = LibraryIndexCache(music)
     cache.put(track, CachedTags(title="Song"))
     monkeypatch.setattr(
-        "SpotiFLAC.core.atomic_io.write_json_atomic",
+        "mornye.core.atomic_io.write_json_atomic",
         lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
     )
     cache.save()  # must not raise
@@ -172,7 +172,7 @@ def test_the_index_gives_the_same_answer_with_and_without_the_cache(library) -> 
     """The cache is an optimisation. If it changes the answer it is a bug,
     not a speed-up.
     """
-    from SpotiFLAC.core.playlist_sync import index_audio_files
+    from mornye.core.playlist_sync import index_audio_files
 
     music, _ = library
     uncached = index_audio_files(music, use_cache=False)

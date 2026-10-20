@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core.musicbrainz import _track_number
-from SpotiFLAC.core.tagger import _embed_m4a, _tag_int
+from mornye.core.musicbrainz import _track_number
+from mornye.core.tagger import _embed_m4a, _tag_int
 
 # --- parsing ----------------------------------------------------------------
 

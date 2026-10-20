@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.extensions.catalog import (
+from mornye.app import MornyeAPI
+from mornye.extensions.catalog import (
     canonical_service_name,
     extension_id,
     installed_download_services,
     known_service,
     service_label,
 )
-from SpotiFLAC.webapp import ALLOWED_METHODS
+from mornye.webapp import ALLOWED_METHODS
 
 
 class _Ext:
@@ -43,7 +43,7 @@ class _Manager:
         ("tidal-py", "tidal"),
         ("ext:tidal-web", "tidal"),
         ("qobuz_py", "qobuz"),
-        ("ytmusic-spotiflac", "youtube"),
+        ("ytmusic-mornye", "youtube"),
         ("youtube-music", "youtube"),
         ("youtube-py", "youtube"),
         ("apple-music-py", "apple"),
@@ -65,7 +65,7 @@ def test_mobile_provider_aliases_are_accepted(service):
 
 def test_mobile_youtube_music_alias_resolves_to_its_extension():
     """Verify the YouTube Music alias selects its installed extension ID."""
-    assert extension_id("youtube-music") == "ytmusic-spotiflac"
+    assert extension_id("youtube-music") == "ytmusic-mornye"
 
 
 def test_two_extensions_for_one_service_are_one_row():
@@ -135,13 +135,13 @@ def test_every_frontend_reads_the_same_list(monkeypatch):
     """
     installed = [_Ext("tidal-web"), _Ext("tidal-py"), _Ext("gdstudio-py")]
     monkeypatch.setattr(
-        "SpotiFLAC.extensions.catalog.ExtensionManager",
+        "mornye.extensions.catalog.ExtensionManager",
         lambda *a, **k: _Manager(installed),
     )
-    from SpotiFLAC.extensions.catalog import installed_service_ids
+    from mornye.extensions.catalog import installed_service_ids
 
     shared = installed_service_ids()
-    gui = [s["id"] for s in SpotiFLAC_API().get_download_services()["services"]]
+    gui = [s["id"] for s in MornyeAPI().get_download_services()["services"]]
 
     assert shared == gui == ["gdstudio", "tidal"]
 
@@ -157,16 +157,16 @@ def test_the_tui_offers_exactly_the_installed_providers(monkeypatch):
 
     installed = [_Ext("tidal-web"), _Ext("tidal-py"), _Ext("gdstudio-py")]
     monkeypatch.setattr(
-        "SpotiFLAC.extensions.catalog.ExtensionManager",
+        "mornye.extensions.catalog.ExtensionManager",
         lambda *a, **k: _Manager(installed),
     )
 
-    from SpotiFLAC.tui.app import SpotiFLACTui
-    from SpotiFLAC.tui.config_state import ConfigState
+    from mornye.tui.app import MornyeTui
+    from mornye.tui.config_state import ConfigState
 
     async def _offered():
         state = ConfigState(output_dir="/tmp/o", services=["tidal"])
-        async with SpotiFLACTui(state).run_test() as pilot:
+        async with MornyeTui(state).run_test() as pilot:
             from textual.widgets import SelectionList
 
             listing = pilot.app.query_one("#cfg-services", SelectionList)
@@ -177,4 +177,4 @@ def test_the_tui_offers_exactly_the_installed_providers(monkeypatch):
 
 def test_the_method_is_reachable_from_the_frontend():
     assert "get_download_services" in ALLOWED_METHODS
-    assert hasattr(SpotiFLAC_API, "get_download_services")
+    assert hasattr(MornyeAPI, "get_download_services")

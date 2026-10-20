@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.api_mixins.subscriptions import SubscriptionsMixin
-from SpotiFLAC.core import subscriptions as subs
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.api_mixins.subscriptions import SubscriptionsMixin
+from mornye.core import subscriptions as subs
+from mornye.core.models import TrackMetadata
 
 PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 ARTIST_URL = "https://open.spotify.com/artist/0000000000000000000000"
@@ -30,7 +30,7 @@ def _track(track_id: str) -> TrackMetadata:
 
 
 class FakeApi(SubscriptionsMixin):
-    """The bits of SpotiFLAC_API the mixin leans on, recording instead."""
+    """The bits of MornyeAPI the mixin leans on, recording instead."""
 
     def __init__(self, owner: str = "") -> None:
         self.owner = owner

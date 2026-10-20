@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core.local_matcher import (
+from mornye.core.local_matcher import (
     SAFE_MATCH_THRESHOLD,
     MatchCandidate,
     score_match,
 )
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.core.text_match import ratio, variant_conflict
+from mornye.core.models import TrackMetadata
+from mornye.core.text_match import ratio, variant_conflict
 
 
 def _track(title: str, artist: str, duration_ms: int = 0) -> TrackMetadata:
@@ -270,7 +270,7 @@ def test_the_same_artist_written_differently_still_matches(expected, found, why)
     artists drags correct matches under the threshold. Measured before the
     fix: 0.43, 0.80, 0.54, 0.57, 0.73, 0.67 and 0.00 respectively.
     """
-    from SpotiFLAC.core.text_match import artist_ratio
+    from mornye.core.text_match import artist_ratio
 
     assert artist_ratio(expected, found) == pytest.approx(1.0), why
 
@@ -289,7 +289,7 @@ def test_different_artists_stay_different(expected, found) -> None:
     that is what keeps "Alive" by Pearl Jam from matching "Alive" by Empire
     Of The Sun.
     """
-    from SpotiFLAC.core.text_match import artist_ratio, artists_match
+    from mornye.core.text_match import artist_ratio, artists_match
 
     assert not artists_match(expected, found)
     assert artist_ratio(expected, found) < 0.5
@@ -299,7 +299,7 @@ def test_cross_script_is_not_a_blanket_yes() -> None:
     """The cross-script rule declines to reject on absent evidence; it must
     not fire when both sides are readable as the same script.
     """
-    from SpotiFLAC.core.text_match import artists_match, is_latin_script
+    from mornye.core.text_match import artists_match, is_latin_script
 
     assert is_latin_script("Drake")
     assert not is_latin_script("ヨアソビ")

@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from SpotiFLAC.core.hires_check import check_file
+from mornye.core.hires_check import check_file
 
 needs_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
@@ -459,7 +459,7 @@ def test_ffmpeg_and_libsndfile_agree_on_a_file_both_can_read(tmp_path) -> None:
 def test_an_unreadable_format_says_which_half_is_missing(tmp_path, monkeypatch) -> None:
     """Without ffmpeg the error names the real problem instead of calling a
     perfectly good file corrupt."""
-    from SpotiFLAC.core import hires_check
+    from mornye.core import hires_check
 
     monkeypatch.setattr(hires_check, "_ffmpeg_available", lambda: False)
     path = tmp_path / "not-audio.m4a"

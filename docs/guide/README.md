@@ -1,4 +1,4 @@
-# SpotiFLAC guide
+# Mornye guide
 
 The pages here were split out of the project README, which had reached 76 KB
 and 87 headings — past the point where either GitHub or PyPI renders it
@@ -13,7 +13,9 @@ usefully. The text is unchanged by the split.
 | [Downloading from a CSV](csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |
 | [Your library in numbers](dashboard.md) | The dashboard built from what you have actually downloaded — top artists, genres, decades, activity |
 | [Configuration](configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
-| [API Reference](api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
+| [Network Destinations](network-destinations.md) | Mounted folders, native SMB profiles, safe transfers, CLI selection and Docker modes |
+| [API Reference](api-reference.md) | `Mornye` and `AsyncMornye`, and the objects they return |
+| [Migration Guide](migration.md) | Moving from the former distribution, CLI, environment, and local state |
 | [Local Tagging](local-tagging.md) | Retagging an existing library, finding and resolving duplicates, MusicBrainz enrichment, download validation |
 | [Automation & Operations](automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
 | [Following Artists](subscriptions.md) | Subscriptions, new-release checks, and the library-upgrade pass |

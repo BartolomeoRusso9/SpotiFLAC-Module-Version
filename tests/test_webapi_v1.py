@@ -1,4 +1,4 @@
-"""Tests for the versioned REST API mounted at /api/v1 (SpotiFLAC/webapi)."""
+"""Tests for the versioned REST API mounted at /api/v1 (mornye/webapi)."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.webapi import ApiDeps, build_v1_router
+from mornye.core.models import TrackMetadata
+from mornye.webapi import ApiDeps, build_v1_router
 
 
 class FakeApi:
-    """The slice of SpotiFLAC_API the v1 router actually touches."""
+    """The slice of MornyeAPI the v1 router actually touches."""
 
     def __init__(self, download_dir: str = "/downloads") -> None:
         self.app_version = "9.9.9"
@@ -123,7 +123,7 @@ def test_resolve_reports_a_bad_url_as_a_client_error(monkeypatch):
             raise ValueError("nope")
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Boom()
+        "mornye.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Boom()
     )
     client, _ = make_client()
     response = client.post("/api/v1/resolve", json={"url": "https://x.invalid/y"})
@@ -149,7 +149,7 @@ def test_resolve_returns_declared_tracks(monkeypatch):
             return ("An Album", [track], "cover", {})
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
+        "mornye.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
     )
     client, _ = make_client()
     body = client.post(
@@ -169,7 +169,7 @@ def test_resolve_classifies_the_url_off_the_event_loop(monkeypatch):
     Called straight from the coroutine that is already on the event loop, one
     of those blocks every other request for the length of the round trip.
     """
-    from SpotiFLAC.core import spotify_metadata
+    from mornye.core import spotify_metadata
 
     class Fake:
         async def get_url_async(self, url, include_featuring=True):
@@ -187,7 +187,7 @@ def test_resolve_classifies_the_url_off_the_event_loop(monkeypatch):
         return {"type": "album", "id": "0" * 22}
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
+        "mornye.core.spotify_metadata.SpotifyMetadataClient", lambda *a, **k: Fake()
     )
     monkeypatch.setattr(spotify_metadata, "parse_spotify_url", parse)
     client, _ = make_client()
@@ -210,7 +210,7 @@ class FakeQueue:
         self.submitted: list[tuple[str, dict]] = []
 
     def submit(self, owner, payload):
-        from SpotiFLAC.core.job_queue import Job
+        from mornye.core.job_queue import Job
 
         job = Job(id=f"j{len(self.jobs)}", owner=owner, payload=payload)
         self.jobs[job.id] = job
@@ -254,7 +254,7 @@ def test_without_a_queue_the_download_is_dispatched_directly():
 def test_a_full_queue_answers_429_without_leaking_the_message():
     class FullQueue(FakeQueue):
         def submit(self, owner, payload):
-            from SpotiFLAC.core.job_queue import QueueFullError
+            from mornye.core.job_queue import QueueFullError
 
             raise QueueFullError("internal detail", pending=50, limit=50)
 
@@ -317,7 +317,7 @@ def test_an_unknown_job_is_404():
 
 
 def test_history_reports_the_download_log_without_paths():
-    from SpotiFLAC.core import download_log
+    from mornye.core import download_log
 
     download_log.record(
         owner="",
@@ -507,7 +507,7 @@ def test_library_duplicates_survives_an_index_it_cannot_write(
     owed to the caller. sqlite3's errors are not OSErrors, so a locked or
     unwritable database used to come back as a 500 with no report in it.
     """
-    from SpotiFLAC.core import library_dedup
+    from mornye.core import library_dedup
 
     def explode(*_args, **_kwargs):
         raise failure
@@ -535,7 +535,7 @@ def test_library_duplicates_rejects_a_match_mode_it_does_not_have(tmp_path):
     shutil.which("ffmpeg") is None, reason="needs ffmpeg to build audio fixtures"
 )
 def test_library_duplicates_groups_and_can_write_its_index(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "cache"))
     library = tmp_path / "music"
     library.mkdir()
     for name, codec in (("a.flac", "flac"), ("b.mp3", "libmp3lame")):
@@ -583,7 +583,7 @@ def test_library_duplicates_groups_and_can_write_its_index(tmp_path, monkeypatch
 
 
 def test_stats_reports_the_log_as_a_dashboard():
-    from SpotiFLAC.core import download_log
+    from mornye.core import download_log
 
     download_log.record(
         title="Song",

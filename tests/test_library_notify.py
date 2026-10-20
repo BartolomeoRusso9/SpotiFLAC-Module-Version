@@ -14,10 +14,10 @@ import urllib.parse
 
 import pytest
 
-from SpotiFLAC.core import library_notify as ln
-from SpotiFLAC.core.loop_runner import run_sync
-from SpotiFLAC.core.models import DownloadResult
-from SpotiFLAC.core.report import RunReport
+from mornye.core import library_notify as ln
+from mornye.core.loop_runner import run_sync
+from mornye.core.models import DownloadResult
+from mornye.core.report import RunReport
 
 
 @pytest.fixture(autouse=True)

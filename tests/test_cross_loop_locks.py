@@ -18,7 +18,7 @@ import threading
 
 import pytest
 
-from SpotiFLAC.core.cross_loop_lock import CrossLoopLock
+from mornye.core.cross_loop_lock import CrossLoopLock
 
 
 async def _contend(lock) -> None:
@@ -38,9 +38,9 @@ async def _contend(lock) -> None:
 
 
 def _shared_locks():
-    from SpotiFLAC.core import dns_doh, isrc_cache, lyrics, profiles, session_memory
-    from SpotiFLAC.core.progress import DownloadManager
-    from SpotiFLAC.core.provider_stats import ProviderScorer
+    from mornye.core import dns_doh, isrc_cache, lyrics, profiles, session_memory
+    from mornye.core.progress import DownloadManager
+    from mornye.core.provider_stats import ProviderScorer
 
     scorer = ProviderScorer()
     return {
@@ -90,7 +90,7 @@ def test_excludes_threads_too() -> None:
 
 def test_isrc_cache_across_batches(tmp_path, monkeypatch) -> None:
     """The reported path itself: two batches, each its own asyncio.run()."""
-    from SpotiFLAC.core import isrc_cache
+    from mornye.core import isrc_cache
 
     monkeypatch.setattr(isrc_cache, "_CACHE_FILE", tmp_path / "isrc-cache.json")
     monkeypatch.setattr(isrc_cache, "_cache", None)

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import subscriptions as subs
-from SpotiFLAC.core.subscriptions import Release, SubscriptionError
+from mornye.core import subscriptions as subs
+from mornye.core.subscriptions import Release, SubscriptionError
 
 ARTIST_URL = "https://open.spotify.com/artist/0000000000000000000000"
 
@@ -213,7 +213,7 @@ PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 
 
 def _track(track_id: str, title: str = "Song"):
-    from SpotiFLAC.core.models import TrackMetadata
+    from mornye.core.models import TrackMetadata
 
     return TrackMetadata(
         id=track_id,

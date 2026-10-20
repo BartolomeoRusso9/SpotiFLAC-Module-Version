@@ -15,8 +15,8 @@ import zipfile
 
 import pytest
 
-from SpotiFLAC.extensions import manager as manager_module
-from SpotiFLAC.extensions.manager import ExtensionManager, _safe_ext_target
+from mornye.extensions import manager as manager_module
+from mornye.extensions.manager import ExtensionManager, _safe_ext_target
 
 
 def _archive(name: str, extra: dict[str, bytes] | None = None) -> bytes:
@@ -42,7 +42,7 @@ def install(manager, tmp_path):
     """Installs an in-memory archive through the public install_from_file()."""
 
     def _install(raw: bytes):
-        path = tmp_path / "ext.spotiflac-ext"
+        path = tmp_path / "ext.mornye-ext"
         path.write_bytes(raw)
         return manager.install_from_file(path)
 

@@ -1,12 +1,12 @@
 # Public API
 
 This document defines the supported Python API surface for the 4.0.0 refactor.
-Implementation modules under `SpotiFLAC.core`, `SpotiFLAC.application`, and
-`SpotiFLAC.downloader` remain internal unless explicitly listed here.
+Implementation modules under `mornye.core`, `mornye.application`, and
+`mornye.downloader` remain internal unless explicitly listed here.
 
 ## Clients
 
-### `SpotiFLAC`
+### `Mornye`
 
 Synchronous compatibility wrapper for downloading one URL, a list of URLs, or
 configured collections.
@@ -19,7 +19,7 @@ The existing positional and keyword arguments remain supported, including:
 - lyrics, Canvas, metadata enrichment, and transcoding options;
 - resume and concurrency options.
 
-### `AsyncSpotiFLAC`
+### `AsyncMornye`
 
 Asynchronous client with the existing methods:
 
@@ -41,9 +41,9 @@ legacy return values and behavior during the incremental migration.
 
 ## Application Contracts
 
-The following contracts are public and re-exported from `SpotiFLAC`:
+The following contracts are public and re-exported from `Mornye`:
 
-- `SpotiFLACConfig`
+- `MornyeConfig`
 - `DownloadRequest`
 - `DownloadReport`
 - `DownloadFailure`
@@ -67,8 +67,8 @@ service. Its convenience properties include `total` and `success_count`.
 
 The following are not public API contracts:
 
-- private helpers on `SpotiflacDownloader`;
+- private helpers on `MornyeDownloader`;
 - `launcher.py` helpers;
-- modules under `SpotiFLAC.core` not re-exported by `SpotiFLAC`;
+- modules under `mornye.core` not re-exported by `Mornye`;
 - application service internals and repository implementation details;
 - GUI, TUI, and WebSocket transport helpers.

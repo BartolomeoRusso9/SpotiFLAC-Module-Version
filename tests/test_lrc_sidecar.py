@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC import downloader as dl
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye import downloader as dl
+from mornye.core.models import DownloadResult, TrackMetadata
 
 WORD_BY_WORD = (
     "[ti:RATATA]\n"
@@ -57,7 +57,7 @@ def lyrics(monkeypatch):
             self.lyrics = text
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.tagger.read_embedded_tags",
+        "mornye.core.tagger.read_embedded_tags",
         lambda path, include_cover=True: _Tags(holder["value"]),
     )
     return holder

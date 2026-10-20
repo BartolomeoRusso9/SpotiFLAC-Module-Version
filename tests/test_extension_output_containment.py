@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.provider import JSExtensionProvider
+from mornye.extensions.provider import JSExtensionProvider
 
 _AUDIO = b"ID3" + b"\x00" * 4096
 

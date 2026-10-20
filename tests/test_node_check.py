@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import subprocess
 
-from SpotiFLAC.core import node_check
+from mornye.core import node_check
 
 
 class _FakeCompletedProcess:

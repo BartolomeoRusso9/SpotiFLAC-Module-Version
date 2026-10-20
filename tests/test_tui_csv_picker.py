@@ -13,15 +13,15 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.csv_picker_screen import CsvPickerScreen
+from mornye.tui.app import MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.csv_picker_screen import CsvPickerScreen
 
 
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -46,7 +46,7 @@ def track_list(tmp_path):
 
 @drives_the_ui
 async def test_browsing_opens_the_picker() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button
 
         app_of(pilot).query_one("#csv-browse", Button).press()
@@ -61,7 +61,7 @@ async def test_browsing_opens_the_picker() -> None:
 
 @drives_the_ui
 async def test_accepting_a_file_fills_the_form(track_list) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
         app_of(pilot).query_one("#csv-browse", Button).press()
@@ -82,7 +82,7 @@ async def test_accepting_a_file_fills_the_form(track_list) -> None:
 @drives_the_ui
 async def test_the_preview_says_what_is_in_the_file(track_list) -> None:
     """A file that parses is not necessarily the right file."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
         app_of(pilot).query_one("#csv-browse", Button).press()
@@ -101,7 +101,7 @@ async def test_the_preview_says_what_is_in_the_file(track_list) -> None:
 
 @drives_the_ui
 async def test_a_missing_file_is_refused(tmp_path) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
         app_of(pilot).query_one("#csv-browse", Button).press()
@@ -129,7 +129,7 @@ async def test_a_track_list_with_no_tracks_is_refused(tmp_path) -> None:
     empty = tmp_path / "empty.csv"
     empty.write_text("title,artist\n")
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
         app_of(pilot).query_one("#csv-browse", Button).press()
@@ -149,7 +149,7 @@ async def test_a_track_list_with_no_tracks_is_refused(tmp_path) -> None:
 @drives_the_ui
 async def test_a_quoted_path_is_understood(track_list) -> None:
     """Dragging a path into a shell wraps it in quotes; so do people."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Button, Input
 
         app_of(pilot).query_one("#csv-browse", Button).press()

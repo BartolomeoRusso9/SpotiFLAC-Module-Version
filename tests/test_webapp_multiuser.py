@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
 TestClient = fastapi_testclient.TestClient
 WebSocketDisconnect = pytest.importorskip("starlette.websockets").WebSocketDisconnect
@@ -17,7 +17,7 @@ WebSocketDisconnect = pytest.importorskip("starlette.websockets").WebSocketDisco
 
 @pytest.fixture(autouse=True)
 def _isolated_users_file(tmp_path, monkeypatch):
-    from SpotiFLAC.core import web_users
+    from mornye.core import web_users
 
     monkeypatch.setattr(web_users, "USERS_FILE", tmp_path / "web_users.json")
     web_users.create_user("alice", "alice-password")

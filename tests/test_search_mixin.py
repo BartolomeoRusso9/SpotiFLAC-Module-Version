@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from SpotiFLAC.api_mixins.search import (
+from mornye.api_mixins.search import (
     SearchMixin,
     empty_results,
     search_metadata_async,
@@ -93,7 +93,7 @@ def test_search_metadata_async_short_circuits_on_an_empty_query() -> None:
 
 
 def test_search_metadata_async_shapes_what_the_client_returns(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Client:
         async def search_async(self, query, limit=50):
@@ -124,7 +124,7 @@ class _Api(SearchMixin):
 
 
 def test_search_provider_returns_the_shaped_results(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Client:
         def search(self, query, limit=50):
@@ -137,7 +137,7 @@ def test_search_provider_returns_the_shaped_results(monkeypatch) -> None:
 
 
 def test_search_provider_reports_a_failure_instead_of_raising(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Angry:
         def search(self, query, limit=50):
@@ -156,7 +156,7 @@ def test_an_empty_query_never_starts_a_thread() -> None:
 
 
 def test_the_thread_pushes_results_to_the_window(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Client:
         def search(self, query, limit=50):
@@ -172,7 +172,7 @@ def test_the_thread_pushes_results_to_the_window(monkeypatch) -> None:
 
 
 def test_the_thread_pushes_an_error_instead_of_dying(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Angry:
         def search(self, query, limit=50):
@@ -188,7 +188,7 @@ def test_the_thread_pushes_an_error_instead_of_dying(monkeypatch) -> None:
 
 
 def test_a_window_that_has_gone_away_does_not_crash_the_search(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Client:
         def search(self, query, limit=50):
@@ -206,7 +206,7 @@ def test_a_window_that_has_gone_away_does_not_crash_the_search(monkeypatch) -> N
 
 def test_a_search_id_comes_back_with_its_answer(monkeypatch) -> None:
     """So the window can drop an answer that a newer search has replaced."""
-    import SpotiFLAC.core.spotify_metadata as metadata_module
+    import mornye.core.spotify_metadata as metadata_module
 
     class _Client:
         def search(self, query, limit=50):
@@ -238,8 +238,8 @@ def test_a_search_id_comes_back_with_its_answer(monkeypatch) -> None:
 def test_the_gui_api_still_offers_both_entry_points() -> None:
     """The mixin has to be mixed in, not merely written."""
     pytest.importorskip("webview")
-    from SpotiFLAC.app import SpotiFLAC_API
+    from mornye.app import MornyeAPI
 
-    assert issubclass(SpotiFLAC_API, SearchMixin)
-    assert callable(SpotiFLAC_API.search_provider)
-    assert callable(SpotiFLAC_API.search_provider_async)
+    assert issubclass(MornyeAPI, SearchMixin)
+    assert callable(MornyeAPI.search_provider)
+    assert callable(MornyeAPI.search_provider_async)

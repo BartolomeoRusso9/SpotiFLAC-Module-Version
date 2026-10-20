@@ -15,7 +15,7 @@ import os
 
 import pytest
 
-from SpotiFLAC.core import csv_picker
+from mornye.core import csv_picker
 
 _EXPORT = (
     "Track Name,Artist Name(s),Album Name,ISRC\n"

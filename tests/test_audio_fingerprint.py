@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core import audio_fingerprint as af
+from mornye.core import audio_fingerprint as af
 
 
 def test_identical_fingerprints_are_fully_similar():

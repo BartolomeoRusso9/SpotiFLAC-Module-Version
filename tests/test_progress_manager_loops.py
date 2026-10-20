@@ -18,13 +18,13 @@ from collections.abc import Generator
 
 import pytest
 
-from SpotiFLAC.core.progress import ProgressManager
+from mornye.core.progress import ProgressManager
 
 
 @pytest.fixture(autouse=True)
 def _no_bars(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Keep tqdm out of it; this is about the queue, not the drawing."""
-    monkeypatch.setenv("SPOTIFLAC_PROGRESS_BARS", "0")
+    monkeypatch.setenv("MORNYE_PROGRESS_BARS", "0")
     ProgressManager._event_queue = None
     ProgressManager._queue_loop = None
     ProgressManager._worker_task = None

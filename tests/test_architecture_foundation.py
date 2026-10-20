@@ -1,8 +1,9 @@
-from SpotiFLAC.extensions.conformance import validate_extension
+from mornye.extensions.conformance import validate_extension
 import asyncio
 import ast
 import logging
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,14 +12,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from SpotiFLAC import (
+from mornye import (
     DownloadFailure,
     DownloadReport,
     DownloadRequest,
     DownloadSkip,
-    SpotiFLACConfig,
+    MornyeConfig,
 )
-from SpotiFLAC.application import (
+from mornye.application import (
     ApiAdapter,
     DownloadService,
     EventBus,
@@ -33,8 +34,8 @@ from SpotiFLAC.application import (
     QueueService,
     PostProcessingService,
 )
-from SpotiFLAC.application import download_engine
-from SpotiFLAC.application.pipeline import (
+from mornye.application import download_engine
+from mornye.application.pipeline import (
     DownloadContext,
     DownloadPipeline,
     CanvasStep,
@@ -46,30 +47,30 @@ from SpotiFLAC.application.pipeline import (
     TagStep,
     ValidateStep,
 )
-from SpotiFLAC.core.repositories import ExtensionRepository, JobRepository
-from SpotiFLAC.core.providers import (
+from mornye.core.repositories import ExtensionRepository, JobRepository
+from mornye.core.providers import (
     ExtensionManifest,
     ProviderCandidate,
     ProviderProfile,
 )
-from SpotiFLAC.client import AsyncSpotiFLAC
-from SpotiFLAC.launcher import build_cli_download_service, run_download_from_cfg
+from mornye.client import AsyncMornye
+from mornye.launcher import build_cli_download_service, run_download_from_cfg
 from tests.fake_providers import FakeProvider
-from SpotiFLAC.webapi import ApiDeps, build_v1_router
+from mornye.webapi import ApiDeps, build_v1_router
 
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
-from SpotiFLAC.core.errors import (
+from mornye.core.models import DownloadResult, TrackMetadata
+from mornye.core.errors import (
     ErrorKind,
     NetworkError,
-    SpotiflacError,
+    MornyeError,
     TrackNotFoundError,
 )
-from SpotiFLAC.core.retry import RetryPolicy
-from SpotiFLAC.downloader import DownloadOptions
+from mornye.core.retry import RetryPolicy
+from mornye.downloader import DownloadOptions
 
 
 def test_spotiflac_config_can_be_built_from_legacy_options():
-    cfg = SpotiFLACConfig.from_legacy_options(
+    cfg = MornyeConfig.from_legacy_options(
         DownloadOptions(
             output_dir="./downloads",
             quality="HI_RES_LOSSLESS",
@@ -85,7 +86,7 @@ def test_spotiflac_config_can_be_built_from_legacy_options():
 
 
 def test_application_imports_legacy_downloader_only_through_adapter():
-    application_dir = Path(__file__).parents[1] / "SpotiFLAC" / "application"
+    application_dir = Path(__file__).parents[1] / "Mornye" / "application"
 
     for path in application_dir.glob("*.py"):
         if path.name in {"legacy_download_adapter.py", "__init__.py"}:
@@ -96,11 +97,11 @@ def test_application_imports_legacy_downloader_only_through_adapter():
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
         ]
-        assert "SpotiFLAC.downloader" not in imports, path.name
+        assert "mornye.downloader" not in imports, path.name
 
 
 def test_tui_does_not_import_or_construct_legacy_downloader():
-    tui_dir = Path(__file__).parents[1] / "SpotiFLAC" / "tui"
+    tui_dir = Path(__file__).parents[1] / "Mornye" / "tui"
 
     for path in tui_dir.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -109,22 +110,22 @@ def test_tui_does_not_import_or_construct_legacy_downloader():
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
         ]
-        assert "SpotiFLAC.downloader" not in imports, path.name
+        assert "mornye.downloader" not in imports, path.name
         assert not any(
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "SpotiflacDownloader"
+            and node.func.id == "MornyeDownloader"
             for node in ast.walk(tree)
         ), path.name
 
 
 def test_application_core_does_not_import_ui_or_web_implementation():
-    application_dir = Path(__file__).parents[1] / "SpotiFLAC" / "application"
+    application_dir = Path(__file__).parents[1] / "Mornye" / "application"
     forbidden = {
-        "SpotiFLAC.app",
-        "SpotiFLAC.tui",
-        "SpotiFLAC.webapp",
-        "SpotiFLAC.webapi",
+        "mornye.app",
+        "mornye.tui",
+        "mornye.webapp",
+        "mornye.webapi",
     }
 
     for path in application_dir.glob("*.py"):
@@ -138,27 +139,25 @@ def test_application_core_does_not_import_ui_or_web_implementation():
 
 
 def test_post_processing_is_exposed_as_application_boundary():
-    assert PostProcessingService.__module__ == "SpotiFLAC.application.post_processing"
+    assert PostProcessingService.__module__ == "mornye.application.post_processing"
     assert (
         "PostProcessingService"
         in (
-            Path(__file__).parents[1] / "SpotiFLAC" / "application" / "__init__.py"
+            Path(__file__).parents[1] / "Mornye" / "application" / "__init__.py"
         ).read_text()
     )
 
 
 def test_download_worker_orchestration_is_application_owned():
-    assert (
-        ApplicationDownloadWorker.__module__ == "SpotiFLAC.application.download_worker"
-    )
+    assert ApplicationDownloadWorker.__module__ == "mornye.application.download_worker"
     assert (
         "class LegacyDownloadWorker"
-        in (Path(__file__).parents[1] / "SpotiFLAC" / "downloader.py").read_text()
+        in (Path(__file__).parents[1] / "Mornye" / "downloader.py").read_text()
     )
 
 
 def test_output_service_creates_configured_library_paths(tmp_path):
-    config = SpotiFLACConfig()
+    config = MornyeConfig()
     config.output.directory = tmp_path
     config.output.artist_subfolders = True
     config.output.album_subfolders = True
@@ -179,7 +178,7 @@ def test_output_service_creates_configured_library_paths(tmp_path):
 
 
 def test_download_request_and_report_contract():
-    cfg = SpotiFLACConfig()
+    cfg = MornyeConfig()
     request = DownloadRequest(sources=["spotify:track:abc123"], config=cfg)
 
     track = TrackMetadata(
@@ -232,7 +231,7 @@ def test_download_service_builds_structured_report_from_request():
     )
     request = DownloadRequest(
         sources=["spotify:track:abc123", "spotify:track:missing"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     report = asyncio.run(service.download(request))
@@ -248,7 +247,7 @@ def test_download_service_builds_legacy_download_options_from_config():
     service = DownloadService()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     opts = service.legacy_options_for(request)
@@ -268,14 +267,14 @@ def test_download_service_uses_legacy_downloader_for_sources(monkeypatch):
         return DownloadResult.ok("tidal", "/music/abc123.flac", source=input_url)
 
     monkeypatch.setattr(
-        "SpotiFLAC.downloader.SpotiflacDownloader.run_async",
+        "mornye.downloader.MornyeDownloader.run_async",
         fake_run_async,
     )
 
     service = DownloadService()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     report = asyncio.run(service.download(request))
@@ -335,9 +334,7 @@ def test_download_service_runs_injected_post_processors(monkeypatch):
     async def fake_tagger(path, metadata):
         calls.append(("tag", path, metadata.title))
 
-    monkeypatch.setattr(
-        "SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run_async
-    )
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", fake_run_async)
     track = TrackMetadata(
         id="track-1",
         title="Song",
@@ -347,7 +344,7 @@ def test_download_service_runs_injected_post_processors(monkeypatch):
     )
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
         prefetched={"spotify:track:abc123": track},
     )
 
@@ -366,12 +363,10 @@ def test_download_service_resolves_metadata_for_post_processors(monkeypatch):
     async def fake_tagger(path, metadata):
         calls.append(metadata.title)
 
-    monkeypatch.setattr(
-        "SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run_async
-    )
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", fake_run_async)
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     asyncio.run(DownloadService(tagger=fake_tagger).download(request))
@@ -389,8 +384,8 @@ def test_download_service_applies_retry_policy(monkeypatch):
             raise RuntimeError("temporary")
         return DownloadResult.ok("tidal", "/music/abc123.flac", source=input_url)
 
-    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", flaky_run)
-    config = SpotiFLACConfig()
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", flaky_run)
+    config = MornyeConfig()
     config.download.retries = 2
     request = DownloadRequest(sources=["spotify:track:abc123"], config=config)
 
@@ -410,11 +405,9 @@ def test_async_client_exposes_application_download_entrypoint(monkeypatch):
                 finished_at=datetime.now(timezone.utc),
             )
 
-    client = AsyncSpotiFLAC(output_dir="./downloads", sync_extensions=False)
+    client = AsyncMornye(output_dir="./downloads", sync_extensions=False)
     client._download_service = FakeDownloadService()
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
 
     report = asyncio.run(client.download_request(request))
 
@@ -431,7 +424,7 @@ def test_download_service_can_reuse_configured_legacy_downloader(monkeypatch):
             return DownloadResult.ok("legacy", "/music/configured.flac", source=source)
 
     request = DownloadRequest(
-        sources=["spotify:track:configured"], config=SpotiFLACConfig()
+        sources=["spotify:track:configured"], config=MornyeConfig()
     )
     report = asyncio.run(DownloadService(downloader=FakeDownloader()).download(request))
 
@@ -448,11 +441,11 @@ def test_download_service_accepts_extension_aware_provider_resolver(monkeypatch)
             "extension-provider", "/music/extension.flac", source=source
         )
 
-    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run)
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", fake_run)
     resolver = ProviderResolver([ProviderProfile("extension-provider", priority=10)])
     request = DownloadRequest(
         sources=["spotify:track:extension"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     report = asyncio.run(DownloadService(provider_resolver=resolver).download(request))
@@ -462,7 +455,7 @@ def test_download_service_accepts_extension_aware_provider_resolver(monkeypatch)
 
 
 def test_async_client_uses_application_service_with_legacy_adapter():
-    client = AsyncSpotiFLAC(output_dir="./downloads", sync_extensions=False)
+    client = AsyncMornye(output_dir="./downloads", sync_extensions=False)
 
     assert isinstance(
         client._download_service._provider_executor, LegacyDownloadAdapter
@@ -489,7 +482,7 @@ def test_async_client_builds_service_via_legacy_factory(monkeypatch):
         DownloadService, "from_legacy_options", classmethod(fake_from_legacy_options)
     )
 
-    client = AsyncSpotiFLAC(output_dir="./downloads", sync_extensions=False)
+    client = AsyncMornye(output_dir="./downloads", sync_extensions=False)
 
     assert seen["options"] is client._opts
     assert seen["downloader"] is client._downloader
@@ -499,7 +492,7 @@ def test_async_client_builds_service_via_legacy_factory(monkeypatch):
 
 
 def test_async_client_batch_and_track_entrypoints_use_application_service(monkeypatch):
-    client = AsyncSpotiFLAC(output_dir="./downloads", sync_extensions=False)
+    client = AsyncMornye(output_dir="./downloads", sync_extensions=False)
     seen = []
 
     async def fake_download(request):
@@ -554,7 +547,7 @@ def test_cli_download_service_keeps_legacy_downloader_beneath_application_bounda
     service = build_cli_download_service(FakeDownloader())
     request = DownloadRequest(
         sources=["spotify:track:cli"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     report = asyncio.run(service.download(request))
@@ -589,9 +582,9 @@ def test_run_download_from_cfg_uses_application_service_for_guided_downloads(
                 finished_at=datetime.now(timezone.utc),
             )
 
-    monkeypatch.setattr("SpotiFLAC.launcher.DownloadService", FakeDownloadService)
+    monkeypatch.setattr("mornye.launcher.DownloadService", FakeDownloadService)
     monkeypatch.setattr(
-        "SpotiFLAC.launcher._run_download_async",
+        "mornye.launcher._run_download_async",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("legacy path used")
         ),
@@ -642,7 +635,7 @@ def test_provider_executor_executes_candidate_chain_via_application_layer():
     )
     request = DownloadRequest(
         sources=["spotify:track:provider-chain"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     executor = ProviderExecutor(execute)
@@ -664,7 +657,7 @@ def test_retry_policy_uses_typed_provider_error_classification():
     assert policy.is_retryable(NetworkError("tidal", "temporary"))
     assert not policy.is_retryable(TrackNotFoundError("tidal", "track-1"))
     assert policy.is_retryable(
-        SpotiflacError(ErrorKind.UNAVAILABLE, "provider unavailable", "tidal")
+        MornyeError(ErrorKind.UNAVAILABLE, "provider unavailable", "tidal")
     )
 
 
@@ -688,7 +681,7 @@ def test_download_service_propagates_provider_timeout():
     async def execute(provider, source):
         raise TimeoutError("provider timeout")
 
-    config = SpotiFLACConfig()
+    config = MornyeConfig()
     config.download.timeout = 1
     request = DownloadRequest(sources=["spotify:track:timeout"], config=config)
     report = asyncio.run(
@@ -714,7 +707,7 @@ def test_legacy_download_adapter_executes_legacy_downloader_via_application_laye
     resolver = ProviderResolver([ProviderProfile("legacy", priority=5)])
     request = DownloadRequest(
         sources=["spotify:track:legacy-compat"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     report = asyncio.run(
@@ -751,7 +744,7 @@ def test_legacy_adapter_forwards_explicit_prefetched_metadata():
     )
     request = DownloadRequest(
         sources=["spotify:track:prefetched-1"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
         prefetched={"spotify:track:prefetched-1": track},
     )
 
@@ -798,7 +791,7 @@ def test_production_legacy_adapter_rejects_unstructured_results():
 def test_legacy_adapter_has_no_synthetic_tmp_result_path():
     adapter_source = (
         Path(__file__).parents[1]
-        / "SpotiFLAC"
+        / "Mornye"
         / "application"
         / "legacy_download_adapter.py"
     ).read_text()
@@ -818,7 +811,7 @@ def test_legacy_adapter_scopes_structured_options_to_selected_provider(monkeypat
             executed.append(source)
             return DownloadResult.ok("qobuz", "/music/scoped.flac", source=source)
 
-    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader", FakeDownloader)
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader", FakeDownloader)
     options = SimpleNamespace(services=["ext:tidal-web"])
     adapter = LegacyDownloadAdapter.from_options(options)
 
@@ -834,7 +827,7 @@ def test_download_service_uses_structured_legacy_result():
             return DownloadResult.ok("legacy", "/music/actual.flac", source=source)
 
     request = DownloadRequest(
-        sources=["spotify:track:structured"], config=SpotiFLACConfig()
+        sources=["spotify:track:structured"], config=MornyeConfig()
     )
     report = asyncio.run(
         DownloadService(
@@ -847,13 +840,173 @@ def test_download_service_uses_structured_legacy_result():
     assert report.succeeded[0].source == "spotify:track:structured"
 
 
+def test_smb_delivery_uses_staging_and_emits_completion_after_upload(
+    tmp_path, monkeypatch
+):
+    from mornye.core import network_destinations
+
+    stage_dir = tmp_path / "delivery-stage"
+    original_output_dir = tmp_path / "original"
+    profile = SimpleNamespace(username="music-user")
+    monkeypatch.setattr(
+        network_destinations.DESTINATIONS,
+        "get",
+        lambda _profile_id: profile,
+    )
+    monkeypatch.setattr(
+        network_destinations.DESTINATIONS,
+        "credentials",
+        lambda _profile: "session-only-secret",
+    )
+
+    def create_stage(_owner=""):
+        stage_dir.mkdir()
+        return stage_dir
+
+    monkeypatch.setattr(network_destinations, "create_staging_directory", create_stage)
+    timeline = []
+
+    class FakeSMBBackend:
+        def __init__(self, *_args):
+            pass
+
+        def test_connection(self):
+            timeline.append("tested")
+
+        def upload_tree(self, local_root, **_kwargs):
+            assert (local_root / "track.bin").read_bytes() == b"audio"
+            timeline.append("uploaded")
+            return [r"\\nas.example.net\Music\track.bin"]
+
+    monkeypatch.setattr(network_destinations, "SMBBackend", FakeSMBBackend)
+
+    class FakeDownloader:
+        def __init__(self):
+            self._opts = SimpleNamespace(output_dir=str(original_output_dir))
+
+        async def run_async(self, source):
+            output = Path(self._opts.output_dir) / "track.bin"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"audio")
+            return DownloadResult.ok("legacy", str(output), source=source)
+
+    events = EventBus()
+    events.subscribe("download.completed", lambda _payload: timeline.append("done"))
+    config = MornyeConfig()
+    config.output.directory = original_output_dir
+    config.output.network_destination_id = "destination1234"
+    request = DownloadRequest(
+        sources=["spotify:track:smb-delivery"],
+        config=config,
+        prefetched={},
+    )
+    downloader = FakeDownloader()
+
+    report = asyncio.run(
+        DownloadService(
+            event_bus=events,
+            provider_resolver=ProviderResolver([ProviderProfile("legacy")]),
+            provider_executor=LegacyDownloadAdapter(downloader),
+        ).download(request)
+    )
+
+    assert len(report.succeeded) == 1, report.failed
+    assert report.succeeded[0].file_path == r"\\nas.example.net\Music\track.bin"
+    assert (
+        timeline.index("tested") < timeline.index("uploaded") < timeline.index("done")
+    )
+    assert request.config.output.directory == original_output_dir
+    assert downloader._opts.output_dir == str(original_output_dir)
+    assert not stage_dir.exists()
+
+
+def test_cancelling_smb_delivery_waits_for_worker_and_keeps_staging(
+    tmp_path, monkeypatch
+):
+    from mornye.core import network_destinations
+
+    stage_dir = tmp_path / "delivery-stage"
+    original_output_dir = tmp_path / "original"
+    profile = SimpleNamespace(username="music-user")
+    monkeypatch.setattr(
+        network_destinations.DESTINATIONS,
+        "get",
+        lambda _profile_id: profile,
+    )
+    monkeypatch.setattr(
+        network_destinations.DESTINATIONS,
+        "credentials",
+        lambda _profile: "session-only-secret",
+    )
+
+    def create_stage(_owner=""):
+        stage_dir.mkdir()
+        return stage_dir
+
+    monkeypatch.setattr(network_destinations, "create_staging_directory", create_stage)
+    upload_started = threading.Event()
+
+    class FakeSMBBackend:
+        def __init__(self, *_args):
+            pass
+
+        def test_connection(self):
+            pass
+
+        def upload_tree(self, local_root, *, cancel_event, **_kwargs):
+            assert (local_root / "track.bin").exists()
+            upload_started.set()
+            assert cancel_event.wait(timeout=3)
+            raise network_destinations.DestinationError("delivery cancelled")
+
+    monkeypatch.setattr(network_destinations, "SMBBackend", FakeSMBBackend)
+
+    class FakeDownloader:
+        def __init__(self):
+            self._opts = SimpleNamespace(output_dir=str(original_output_dir))
+
+        async def run_async(self, source):
+            output = Path(self._opts.output_dir) / "track.bin"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"audio")
+            return DownloadResult.ok("legacy", str(output), source=source)
+
+    completed = []
+    events = EventBus()
+    events.subscribe("download.completed", lambda payload: completed.append(payload))
+    config = MornyeConfig()
+    config.output.network_destination_id = "destination1234"
+    request = DownloadRequest(
+        sources=["spotify:track:smb-cancel"],
+        config=config,
+        prefetched={},
+    )
+    service = DownloadService(
+        event_bus=events,
+        provider_resolver=ProviderResolver([ProviderProfile("legacy")]),
+        provider_executor=LegacyDownloadAdapter(FakeDownloader()),
+    )
+
+    async def cancel_during_upload():
+        task = asyncio.create_task(service.download(request))
+        assert await asyncio.to_thread(upload_started.wait, 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_during_upload())
+
+    assert (stage_dir / "track.bin").read_bytes() == b"audio"
+    assert completed == []
+
+
 def test_download_service_does_not_synthesize_missing_provider_results():
     class UnstructuredExecutor(ProviderExecutor):
         async def execute(self, provider, source):
             return None
 
     request = DownloadRequest(
-        sources=["spotify:track:unstructured"], config=SpotiFLACConfig()
+        sources=["spotify:track:unstructured"], config=MornyeConfig()
     )
     report = asyncio.run(
         DownloadService(
@@ -877,7 +1030,7 @@ def test_skipped_provider_results_preserve_source_and_report_skip():
         DownloadService(
             provider_resolver=ProviderResolver([ProviderProfile("tidal")]),
             provider_executor=execute,
-        ).download(DownloadRequest(sources=[source], config=SpotiFLACConfig()))
+        ).download(DownloadRequest(sources=[source], config=MornyeConfig()))
     )
 
     assert report.succeeded == []
@@ -897,7 +1050,7 @@ def test_failed_provider_results_are_not_reported_as_success_and_fall_back():
         return DownloadResult.ok(provider, "/music/fallback.flac", source=source)
 
     request = DownloadRequest(
-        sources=["spotify:track:failed-result"], config=SpotiFLACConfig()
+        sources=["spotify:track:failed-result"], config=MornyeConfig()
     )
     report = asyncio.run(
         DownloadService(
@@ -946,7 +1099,7 @@ def test_application_metadata_is_forwarded_without_legacy_reresolution():
             raise AssertionError("legacy metadata resolver was used")
 
     request = DownloadRequest(
-        sources=["spotify:track:single-resolution"], config=SpotiFLACConfig()
+        sources=["spotify:track:single-resolution"], config=MornyeConfig()
     )
     report = asyncio.run(
         DownloadService(
@@ -980,7 +1133,7 @@ def test_metadata_service_uses_injected_real_resolver():
 
     request = DownloadRequest(
         sources=["https://open.spotify.com/track/real-metadata"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     resolved = asyncio.run(MetadataService(resolve).resolve(request))
@@ -999,12 +1152,12 @@ def test_metadata_service_swallows_only_best_effort_lookup_failures():
 
     async def raises(kind):
         async def resolve(_source):
-            raise SpotiflacError(kind, "boom")
+            raise MornyeError(kind, "boom")
 
         return resolve
 
     def request(source="https://www.deezer.com/ru/album/1102603792"):
-        return DownloadRequest(sources=[source], config=SpotiFLACConfig())
+        return DownloadRequest(sources=[source], config=MornyeConfig())
 
     for kind in (ErrorKind.INVALID_URL, ErrorKind.UNAVAILABLE):
         service = MetadataService(asyncio.run(raises(kind)))
@@ -1012,7 +1165,7 @@ def test_metadata_service_swallows_only_best_effort_lookup_failures():
 
     for kind in (ErrorKind.AUTH_FAILED, ErrorKind.RATE_LIMITED, ErrorKind.FILE_IO):
         service = MetadataService(asyncio.run(raises(kind)))
-        with pytest.raises(SpotiflacError):
+        with pytest.raises(MornyeError):
             asyncio.run(service.resolve(request()))
 
 
@@ -1031,9 +1184,7 @@ def test_download_service_falls_back_to_next_provider_candidate():
             ProviderProfile("second", priority=1),
         ]
     )
-    request = DownloadRequest(
-        sources=["spotify:track:fallback"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:fallback"], config=MornyeConfig())
 
     report = asyncio.run(
         DownloadService(
@@ -1058,7 +1209,7 @@ def test_fake_provider_framework_models_fallback_without_network():
     resolver = ProviderResolver(
         [ProviderProfile("first", priority=2), ProviderProfile("second", priority=1)]
     )
-    request = DownloadRequest(sources=["spotify:track:fake"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:fake"], config=MornyeConfig())
     report = asyncio.run(
         DownloadService(
             provider_resolver=resolver,
@@ -1077,7 +1228,7 @@ def test_download_service_publishes_terminal_events(monkeypatch):
     async def fake_run(self, input_url, loop_minutes=None):
         return DownloadResult.ok("tidal", "/music/events.flac", source=input_url)
 
-    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run)
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", fake_run)
     bus = EventBus()
     bus.subscribe(
         "download.completed", lambda payload: events.append(("done", payload))
@@ -1085,7 +1236,7 @@ def test_download_service_publishes_terminal_events(monkeypatch):
     bus.subscribe("download.failed", lambda payload: events.append(("failed", payload)))
     request = DownloadRequest(
         sources=["spotify:track:abc123", "http://unsupported"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     asyncio.run(DownloadService(event_bus=bus).download(request))
@@ -1099,13 +1250,11 @@ def test_download_service_publishes_provider_events(monkeypatch):
     async def fake_run(self, input_url, loop_minutes=None):
         return DownloadResult.ok("tidal", "/music/provider.flac", source=input_url)
 
-    monkeypatch.setattr("SpotiFLAC.downloader.SpotiflacDownloader.run_async", fake_run)
+    monkeypatch.setattr("mornye.downloader.MornyeDownloader.run_async", fake_run)
     bus = EventBus()
     for event_name in ("provider.started", "provider.succeeded"):
         bus.subscribe(event_name, lambda payload, name=event_name: events.append(name))
-    request = DownloadRequest(
-        sources=["spotify:track:provider"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:provider"], config=MornyeConfig())
 
     asyncio.run(DownloadService(event_bus=bus).download(request))
 
@@ -1116,7 +1265,7 @@ def test_queue_service_tracks_job_state():
     service = QueueService()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     job = asyncio.run(service.enqueue(request))
@@ -1132,12 +1281,12 @@ def test_queue_service_tracks_job_state():
 
 def test_queue_service_persists_jobs_in_repository(tmp_path, monkeypatch):
     db_path = tmp_path / "queue-persistence.db"
-    monkeypatch.setenv("SPOTIFLAC_DB_PATH", str(db_path))
+    monkeypatch.setenv("MORNYE_DB_PATH", str(db_path))
 
     service = QueueService(repo=JobRepository())
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     job = asyncio.run(service.enqueue(request))
@@ -1153,7 +1302,7 @@ def test_metadata_service_resolves_sources_to_track_metadata():
     service = MetadataService()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     resolved = asyncio.run(service.resolve(request))
@@ -1168,7 +1317,7 @@ def test_provider_resolver_prefers_supported_quality_and_fallback_order():
     resolver = ProviderResolver()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     candidates = resolver.resolve(request)
@@ -1179,7 +1328,7 @@ def test_provider_resolver_prefers_supported_quality_and_fallback_order():
 
 
 def test_provider_resolver_preserves_configured_legacy_services():
-    config = SpotiFLACConfig()
+    config = MornyeConfig()
     config.download.services = ["ext:qobuz-web"]
     request = DownloadRequest(sources=["spotify:track:abc123"], config=config)
 
@@ -1188,9 +1337,7 @@ def test_provider_resolver_preserves_configured_legacy_services():
 
 def test_download_pipeline_prepares_source_and_provider_context():
     """Verify preparation records the selected provider and ordered candidates."""
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
     pipeline = DownloadPipeline([ResolveStep(), ProviderStep(ProviderResolver())])
 
     context = asyncio.run(
@@ -1214,7 +1361,7 @@ def test_download_pipeline_prepares_source_and_provider_context():
 def test_download_pipeline_accepts_public_spotify_track_urls():
     request = DownloadRequest(
         sources=["https://open.spotify.com/track/abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
     context = asyncio.run(
         DownloadPipeline([ResolveStep()]).prepare(
@@ -1237,7 +1384,7 @@ def test_download_pipeline_publishes_namespaced_step_events():
     bus.subscribe(
         "pipeline.completed", lambda payload: events.append("pipeline-completed")
     )
-    request = DownloadRequest(sources=["spotify:track:event"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:event"], config=MornyeConfig())
     pipeline = DownloadPipeline(
         [ResolveStep()],
         event_bus=bus,
@@ -1266,7 +1413,7 @@ def test_download_service_publishes_post_step_events():
         return DownloadResult.ok(provider, "/music/post-step.flac", source=source)
 
     request = DownloadRequest(
-        sources=["spotify:track:post-step"], config=SpotiFLACConfig()
+        sources=["spotify:track:post-step"], config=MornyeConfig()
     )
     asyncio.run(
         DownloadService(event_bus=bus, provider_executor=execute).download(request)
@@ -1278,9 +1425,7 @@ def test_download_service_publishes_post_step_events():
 def test_validate_step_rejects_an_invalid_existing_flac(tmp_path):
     path = tmp_path / "broken.flac"
     path.write_bytes(b"not flac")
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
     context = DownloadContext(
         request=request,
         source=request.sources[0],
@@ -1299,9 +1444,7 @@ def test_tag_step_delegates_to_the_tagging_boundary():
     async def fake_tagger(path, metadata):
         calls.append((path, metadata.title))
 
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
     track = TrackMetadata(
         id="track-1",
         title="Song",
@@ -1329,7 +1472,7 @@ def test_host_injects_metadata_for_audio_only_provider(tmp_path, monkeypatch):
         """Record the path, title, and tagging options passed to the host tagger."""
         calls.append((path, metadata.title, options.embed_lyrics, options.enrich))
 
-    monkeypatch.setattr("SpotiFLAC.core.tagger.embed_metadata_async", fake_embed)
+    monkeypatch.setattr("mornye.core.tagger.embed_metadata_async", fake_embed)
     path = tmp_path / "song.flac"
     path.write_bytes(b"audio")
     track = TrackMetadata(
@@ -1367,9 +1510,7 @@ def test_lyrics_and_canvas_steps_delegate_post_processing():
     async def fake_canvas(path, metadata):
         calls.append(("canvas", path, metadata.title))
 
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
     track = TrackMetadata(
         id="track-1",
         title="Song",
@@ -1402,9 +1543,7 @@ def test_transcode_and_library_steps_update_context_and_index_output():
     async def fake_index(path, context):
         calls.append(path)
 
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
     context = DownloadContext(
         request=request,
         source=request.sources[0],
@@ -1429,7 +1568,7 @@ def test_provider_resolver_filters_capability_quality_and_health():
             ProviderProfile("search-only", capabilities=frozenset({"search"})),
         ]
     )
-    request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:abc"], config=MornyeConfig())
 
     assert resolver.resolve(request) == ["slow"]
     request.config.download.quality = "HI_RES_LOSSLESS"
@@ -1440,7 +1579,7 @@ def test_provider_resolver_exposes_structured_candidates():
     resolver = ProviderResolver(
         [ProviderProfile("tidal", priority=4, capabilities=frozenset({"download"}))]
     )
-    request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:abc"], config=MornyeConfig())
 
     candidates = resolver.resolve_candidates(request)
 
@@ -1474,7 +1613,7 @@ def test_provider_resolver_can_load_installed_extension_manifests():
         },
     )
     resolver = ProviderResolver.from_extensions([extension])
-    request = DownloadRequest(sources=["spotify:track:abc"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:abc"], config=MornyeConfig())
 
     assert resolver.resolve(request) == ["tidal-web"]
 
@@ -1541,7 +1680,7 @@ def test_extension_service_tracks_lifecycle_and_trust():
 
 def test_repository_layer_persists_jobs_and_extensions(tmp_path, monkeypatch):
     db_path = tmp_path / "repository-test.db"
-    monkeypatch.setenv("SPOTIFLAC_DB_PATH", str(db_path))
+    monkeypatch.setenv("MORNYE_DB_PATH", str(db_path))
 
     job_repo = JobRepository()
     extension_repo = ExtensionRepository()
@@ -1603,12 +1742,12 @@ def test_api_adapter_lists_and_gets_persisted_jobs(tmp_path):
 
 def test_job_service_tracks_queue_and_repository_state(tmp_path, monkeypatch):
     db_path = tmp_path / "job-service.db"
-    monkeypatch.setenv("SPOTIFLAC_DB_PATH", str(db_path))
+    monkeypatch.setenv("MORNYE_DB_PATH", str(db_path))
 
     service = JobService()
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     job = asyncio.run(service.enqueue(request))
@@ -1633,7 +1772,7 @@ def test_job_service_executes_download_and_persists_terminal_status(tmp_path):
     )
     request = DownloadRequest(
         sources=["spotify:track:abc123"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     job = asyncio.run(service.enqueue(request))
@@ -1645,9 +1784,7 @@ def test_job_service_executes_download_and_persists_terminal_status(tmp_path):
 
 def test_job_service_can_cancel_and_retry_jobs(tmp_path):
     service = JobService(repo=JobRepository(tmp_path / "lifecycle.db"))
-    request = DownloadRequest(
-        sources=["spotify:track:abc123"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:abc123"], config=MornyeConfig())
 
     job = asyncio.run(service.enqueue(request))
     asyncio.run(service.cancel(job["id"]))
@@ -1672,7 +1809,7 @@ def test_job_service_pause_propagates_to_active_provider_and_resumes(tmp_path):
         download_service=DownloadService(provider_executor=BlockingExecutor()),
     )
     request = DownloadRequest(
-        sources=["spotify:track:active-pause"], config=SpotiFLACConfig()
+        sources=["spotify:track:active-pause"], config=MornyeConfig()
     )
 
     async def scenario():
@@ -1697,7 +1834,7 @@ def test_job_service_retries_after_pause_cancel_and_recovers_running_items(tmp_p
     repo = JobRepository(tmp_path / "retry-recovery.db")
     service = JobService(repo=repo, download_service=DownloadService())
     request = DownloadRequest(
-        sources=["spotify:track:retry-recovery"], config=SpotiFLACConfig()
+        sources=["spotify:track:retry-recovery"], config=MornyeConfig()
     )
     job = asyncio.run(service.enqueue(request))
     item = service.items(job["id"])[0]
@@ -1718,7 +1855,7 @@ def test_job_service_publishes_retrying_event(tmp_path):
         repo=JobRepository(tmp_path / "retrying.db"),
         event_bus=bus,
     )
-    request = DownloadRequest(sources=["spotify:track:retry"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:retry"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
     asyncio.run(service.cancel(job["id"]))
 
@@ -1735,7 +1872,7 @@ def test_job_service_reconstructs_persisted_request_after_restart(tmp_path):
     repo = JobRepository(tmp_path / "restart.db")
     request = DownloadRequest(
         sources=["spotify:track:restart"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
     first = JobService(repo=repo, download_service=FakeDownloadService())
     job = asyncio.run(first.enqueue(request))
@@ -1753,7 +1890,7 @@ def test_restarted_job_can_transition_through_persistent_queue(tmp_path):
     repo = JobRepository(tmp_path / "restart-queue.db")
     request = DownloadRequest(
         sources=["spotify:track:restart-queue"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
     first = JobService(repo=repo)
     job = asyncio.run(first.enqueue(request))
@@ -1778,9 +1915,7 @@ def test_paused_job_does_not_start_until_resumed(tmp_path):
 
     repo = JobRepository(tmp_path / "paused-execution.db")
     service = JobService(repo=repo, download_service=FakeDownloadService())
-    request = DownloadRequest(
-        sources=["spotify:track:paused"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:paused"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
 
     asyncio.run(service.pause(job["id"]))
@@ -1795,7 +1930,7 @@ def test_paused_job_does_not_start_until_resumed(tmp_path):
 def test_retry_requeues_terminal_job_items(tmp_path):
     repo = JobRepository(tmp_path / "retry-items.db")
     service = JobService(repo=repo)
-    request = DownloadRequest(sources=["spotify:track:retry"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:retry"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
     item = service.items(job["id"])[0]
     repo.update_item(
@@ -1821,9 +1956,7 @@ def test_retry_clears_stale_job_lifecycle_metadata(tmp_path):
     service = JobService(repo=repo)
     job = asyncio.run(
         service.enqueue(
-            DownloadRequest(
-                sources=["spotify:track:retry-meta"], config=SpotiFLACConfig()
-            )
+            DownloadRequest(sources=["spotify:track:retry-meta"], config=MornyeConfig())
         )
     )
     repo.update_status(job["id"], "RUNNING")
@@ -1853,7 +1986,7 @@ def test_job_service_publishes_lifecycle_events(tmp_path):
         download_service=FakeDownloadService(),
         event_bus=bus,
     )
-    request = DownloadRequest(sources=["spotify:track:event"], config=SpotiFLACConfig())
+    request = DownloadRequest(sources=["spotify:track:event"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
     asyncio.run(service.execute(job["id"]))
 
@@ -1872,9 +2005,7 @@ def test_job_service_cancels_active_download_task(tmp_path):
         repo=JobRepository(tmp_path / "cancel-active.db"),
         download_service=SlowDownloadService(),
     )
-    request = DownloadRequest(
-        sources=["spotify:track:cancel"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:cancel"], config=MornyeConfig())
 
     async def scenario():
         job = await service.enqueue(request)
@@ -1897,9 +2028,7 @@ def test_job_service_persists_execution_attempts(tmp_path):
 
     repo = JobRepository(tmp_path / "attempts.db")
     service = JobService(repo=repo, download_service=FakeDownloadService())
-    request = DownloadRequest(
-        sources=["spotify:track:attempt"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:attempt"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
 
     asyncio.run(service.execute(job["id"]))
@@ -1915,7 +2044,7 @@ def test_job_service_persists_one_item_per_source(tmp_path):
     service = JobService(repo=repo)
     request = DownloadRequest(
         sources=["spotify:track:item-a", "spotify:track:item-b"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
 
     job = asyncio.run(service.enqueue(request))
@@ -1948,7 +2077,7 @@ def test_job_service_updates_item_results_by_source(tmp_path):
     service = JobService(repo=repo, download_service=FakeDownloadService())
     request = DownloadRequest(
         sources=["spotify:track:done", "spotify:track:failed"],
-        config=SpotiFLACConfig(),
+        config=MornyeConfig(),
     )
     job = asyncio.run(service.enqueue(request))
     asyncio.run(service.execute(job["id"]))
@@ -1978,9 +2107,7 @@ def test_job_service_marks_skipped_items_terminal(tmp_path):
 
     repo = JobRepository(tmp_path / "item-skipped.db")
     service = JobService(repo=repo, download_service=FakeDownloadService())
-    request = DownloadRequest(
-        sources=["spotify:track:skipped"], config=SpotiFLACConfig()
-    )
+    request = DownloadRequest(sources=["spotify:track:skipped"], config=MornyeConfig())
     job = asyncio.run(service.enqueue(request))
     asyncio.run(service.execute(job["id"]))
 
@@ -2009,7 +2136,7 @@ def test_job_service_marks_report_failures_as_failed(tmp_path):
     job = asyncio.run(
         service.enqueue(
             DownloadRequest(
-                sources=["spotify:track:report-failure"], config=SpotiFLACConfig()
+                sources=["spotify:track:report-failure"], config=MornyeConfig()
             )
         )
     )
@@ -2048,9 +2175,7 @@ def test_job_service_publishes_item_updates(tmp_path):
     )
     job = asyncio.run(
         service.enqueue(
-            DownloadRequest(
-                sources=["spotify:track:item-event"], config=SpotiFLACConfig()
-            )
+            DownloadRequest(sources=["spotify:track:item-event"], config=MornyeConfig())
         )
     )
     asyncio.run(service.execute(job["id"]))
@@ -2131,7 +2256,7 @@ def test_api_adapter_exposes_job_item_details(tmp_path):
 
 
 def test_job_response_schema_accepts_persisted_lifecycle_states():
-    from SpotiFLAC.webapi.schemas import JobOut
+    from mornye.webapi.schemas import JobOut
 
     for status in ("paused", "retrying", "cancelled"):
         job = JobOut(

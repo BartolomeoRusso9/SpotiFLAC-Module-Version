@@ -1,11 +1,11 @@
-"""`spotiflac --web` argument parsing.
+"""`mornye --web` argument parsing.
 
 The --web branch in launcher.amain() builds its own small parser for
 --host/--port/--web-token/--web-multiuser. argparse expands unambiguous
 option prefixes by default, and `--web` — always present, since it is what
 selects this branch — is a prefix of both --web-token and --web-multiuser.
 That makes it "ambiguous", and argparse's response to an ambiguous option
-is to print usage and exit(2): the plain, documented `spotiflac --web`
+is to print usage and exit(2): the plain, documented `mornye --web`
 invocation never reached the server at all.
 
 These tests drive the real branch rather than a copy of the parser, so they
@@ -21,9 +21,9 @@ import asyncio
 import pytest
 
 pytest.importorskip("fastapi")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
-from SpotiFLAC import launcher
+from mornye import launcher
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def run_web_calls(monkeypatch) -> Any:
     monkeypatch.setattr(launcher, "check_for_updates_async", _no_updates)
 
     def _run(argv: list[str]) -> dict:
-        monkeypatch.setattr("sys.argv", ["spotiflac", *argv])
+        monkeypatch.setattr("sys.argv", ["mornye", *argv])
         asyncio.run(launcher.amain())
         assert calls, f"--web branch never reached run_async for {argv}"
         return calls[-1]
@@ -85,21 +85,21 @@ def test_web_token_and_multiuser_still_parse(run_web_calls) -> None:
 def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
     """--json puts the report on stdout, so nothing else may go there.
     Console output already went to stderr; the ASCII banner did not, which
-    made `spotiflac ... --json | jq` fail on the first byte.
+    made `mornye ... --json | jq` fail on the first byte.
     """
     import sys
 
-    from SpotiFLAC.launcher import _print_welcome_banner
+    from mornye.launcher import _print_welcome_banner
 
     original = sys.argv
     try:
-        sys.argv = ["spotiflac", "--json", "https://example.invalid", "/tmp"]
+        sys.argv = ["mornye", "--json", "https://example.invalid", "/tmp"]
         _print_welcome_banner()
         assert capsys.readouterr().out == ""
 
-        sys.argv = ["spotiflac", "https://example.invalid", "/tmp"]
+        sys.argv = ["mornye", "https://example.invalid", "/tmp"]
         _print_welcome_banner()
-        assert "SpotiFLAC" in capsys.readouterr().out
+        assert "Mornye" in capsys.readouterr().out
     finally:
         sys.argv = original
 
@@ -110,11 +110,11 @@ def test_the_welcome_banner_is_suppressed_under_json(capsys) -> None:
 def test_help_skips_the_startup_network_work() -> None:
     """argparse handles -h/--help further down amain(), and everything before
     that point — the update check and the extension registry bootstrap —
-    reaches the network. `spotiflac --help` therefore waited on three HTTP
+    reaches the network. `mornye --help` therefore waited on three HTTP
     attempts per configured registry to print a static string, and appeared
     to hang outright when a registry was slow to answer.
     """
-    from SpotiFLAC.launcher import _is_help_invocation
+    from mornye.launcher import _is_help_invocation
 
     assert _is_help_invocation(["--help"])
     assert _is_help_invocation(["-h"])
@@ -125,7 +125,7 @@ def test_a_real_command_is_not_mistaken_for_help() -> None:
     """The bootstrap has to keep running for everything that uses
     extensions, which is nearly everything.
     """
-    from SpotiFLAC.launcher import _is_help_invocation
+    from mornye.launcher import _is_help_invocation
 
     for argv in (
         [],
@@ -148,7 +148,7 @@ def test_amain_guards_both_network_steps(monkeypatch, capsys) -> None:
     """
     import sys
 
-    from SpotiFLAC.extensions import manager as ext_manager
+    from mornye.extensions import manager as ext_manager
 
     ran: list[str] = []
 
@@ -163,7 +163,7 @@ def test_amain_guards_both_network_steps(monkeypatch, capsys) -> None:
     monkeypatch.setattr(ext_manager, "ExtensionManager", _manager)
     # amain() takes no arguments: it reads sys.argv itself, both for the
     # help sniff above and for the parser below it.
-    monkeypatch.setattr(sys, "argv", ["spotiflac", "--help"])
+    monkeypatch.setattr(sys, "argv", ["mornye", "--help"])
 
     with pytest.raises(SystemExit) as exit_info:
         asyncio.run(launcher.amain())

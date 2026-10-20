@@ -21,11 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core.transcode import (
+from mornye.core.transcode import (
     _probe_source,
     already_in_target_format,
 )
-from SpotiFLAC.extensions.provider import _m4a_is_the_final_container
+from mornye.extensions.provider import _m4a_is_the_final_container
 
 
 def _encode(tmp_path: Path, name: str, *args: str) -> Path:

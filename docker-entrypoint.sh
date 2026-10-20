@@ -6,26 +6,38 @@ set -e
 #
 # Three ways to choose who the container runs as, all supported:
 #
-#   1. Nothing set: the image's own `spotiflac` user, UID/GID 1000.
+#   1. Nothing set: the image's own `mornye` user, UID/GID 1000.
 #   2. `user: "1234:1234"` (compose) / `--user 1234:1234` (docker run): any
 #      UID/GID, no root involved at any point. The mounted directories must
 #      already be writable by that UID.
 #   3. `user: "0:0"` plus PUID/PGID: starts as root only long enough to make
 #      the data directories belong to PUID:PGID, then drops to them for good
-#      — nothing below this block, and nothing SpotiFLAC itself does, ever
+#      — nothing below this block, and nothing Mornye itself does, ever
 #      runs as root. Use it when the volumes are not writable by the target
 #      UID yet (a named volume, a freshly created bind mount).
 #
 # Where things go is independent of $HOME, so none of the three needs a home
 # directory that exists or is writable:
 #
-#   SPOTIFLAC_DATA_DIR      database, extensions, sessions, settings
-#                           (default /home/spotiflac/.spotiflac)
-#   SPOTIFLAC_CACHE_DIR     regenerable cache (default $SPOTIFLAC_DATA_DIR/.cache)
-#   SPOTIFLAC_DOWNLOAD_DIR  where --web saves music (default ~/Music/SpotiFLAC)
+#   MORNYE_DATA_DIR      database, extensions, sessions, settings
+#                           (default /home/mornye/.mornye)
+#   MORNYE_CACHE_DIR     regenerable cache (default $MORNYE_DATA_DIR/.cache)
+#   MORNYE_DOWNLOAD_DIR  where --web saves music (default ~/Music/Mornye)
 # ==============================================================================
-: "${SPOTIFLAC_DATA_DIR:=${HOME:-/home/spotiflac}/.spotiflac}"
-export SPOTIFLAC_DATA_DIR
+if [ -z "${MORNYE_DATA_DIR:-}" ] && [ -n "${SPOTIFLAC_DATA_DIR:-}" ]; then
+  MORNYE_DATA_DIR="$SPOTIFLAC_DATA_DIR"
+fi
+if [ -z "${MORNYE_CACHE_DIR:-}" ] && [ -n "${SPOTIFLAC_CACHE_DIR:-}" ]; then
+  MORNYE_CACHE_DIR="$SPOTIFLAC_CACHE_DIR"
+fi
+if [ -z "${MORNYE_EXT_DIR:-}" ] && [ -n "${SPOTIFLAC_EXT_DIR:-}" ]; then
+  MORNYE_EXT_DIR="$SPOTIFLAC_EXT_DIR"
+fi
+if [ -z "${MORNYE_DOWNLOAD_DIR:-}" ] && [ -n "${SPOTIFLAC_DOWNLOAD_DIR:-}" ]; then
+  MORNYE_DOWNLOAD_DIR="$SPOTIFLAC_DOWNLOAD_DIR"
+fi
+: "${MORNYE_DATA_DIR:=${HOME:-/home/mornye}/.mornye}"
+export MORNYE_DATA_DIR
 
 if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}${PGID:-}" ]; then
   run_uid="${PUID:-1000}"
@@ -33,18 +45,18 @@ if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}${PGID:-}" ]; then
   if [ "$run_uid" != "0" ]; then
     # The data directory is small and entirely ours: hand over all of it, but
     # only when the top level says it has not been done already.
-    for dir in "$SPOTIFLAC_DATA_DIR" "${SPOTIFLAC_CACHE_DIR:-}"; do
+    for dir in "$MORNYE_DATA_DIR" "${MORNYE_CACHE_DIR:-}" "${MORNYE_EXT_DIR:-}"; do
       [ -n "$dir" ] || continue
       mkdir -p "$dir" 2>/dev/null || true
       if [ "$(stat -c '%u:%g' "$dir" 2>/dev/null)" != "$run_uid:$run_gid" ]; then
         chown -R "$run_uid:$run_gid" "$dir" 2>/dev/null \
-          || echo "spotiflac: could not chown $dir to $run_uid:$run_gid" >&2
+          || echo "mornye: could not chown $dir to $run_uid:$run_gid" >&2
       fi
     done
     # The download directory may be a whole music library, on storage where
     # root is not even allowed to chown (NFS, mergerfs): top level only,
     # never recursive, and a failure is not an error.
-    for dir in "${SPOTIFLAC_DOWNLOAD_DIR:-}" /app/downloads; do
+    for dir in "${MORNYE_DOWNLOAD_DIR:-}" /app/downloads; do
       [ -n "$dir" ] || continue
       mkdir -p "$dir" 2>/dev/null || true
       chown "$run_uid:$run_gid" "$dir" 2>/dev/null || true
@@ -53,20 +65,20 @@ if [ "$(id -u)" = "0" ] && [ -n "${PUID:-}${PGID:-}" ]; then
   fi
 fi
 
-# An arbitrary UID has no home of its own, and /home/spotiflac belongs to UID
-# 1000 (or sits on a read-only root filesystem). SpotiFLAC's own data no longer
+# An arbitrary UID has no home of its own, and /home/mornye belongs to UID
+# 1000 (or sits on a read-only root filesystem). Mornye's own data no longer
 # depends on $HOME (pinned above), but Chromium, fontconfig and Node still
 # expect one they can write to.
 if [ ! -w "${HOME:-/nonexistent}" ]; then
-  export HOME="${TMPDIR:-/tmp}/spotiflac-home"
+  export HOME="${TMPDIR:-/tmp}/mornye-home"
   mkdir -p "$HOME" 2>/dev/null || true
 fi
 
-mkdir -p "$SPOTIFLAC_DATA_DIR" 2>/dev/null || true
-if [ ! -w "$SPOTIFLAC_DATA_DIR" ]; then
-  echo "spotiflac: $SPOTIFLAC_DATA_DIR is not writable by UID $(id -u):$(id -g)." >&2
-  echo "spotiflac: chown the mounted directory on the host, or start the container" >&2
-  echo "spotiflac: with user \"0:0\" and PUID/PGID set so it is fixed for you." >&2
+mkdir -p "$MORNYE_DATA_DIR" 2>/dev/null || true
+if [ ! -w "$MORNYE_DATA_DIR" ]; then
+  echo "mornye: $MORNYE_DATA_DIR is not writable by UID $(id -u):$(id -g)." >&2
+  echo "mornye: chown the mounted directory on the host, or start the container" >&2
+  echo "mornye: with user \"0:0\" and PUID/PGID set so it is fixed for you." >&2
 fi
 
 # ==============================================================================
@@ -87,10 +99,10 @@ fi
 # Example:
 # docker run --rm -it \
 #   -p 8000:8000 \
-#   -e SPOTIFLAC_REGISTRIES=https://example.com/my-registry.json \
+#   -e MORNYE_REGISTRIES=https://example.com/my-registry.json \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
-#   spotiflac --web --host 0.0.0.0 --port 8000
+#   -v "$(pwd)/.spotiflac_docker:/home/mornye/.mornye" \
+#   mornye --web --host 0.0.0.0 --port 8000
 #
 # Note: --host 0.0.0.0 is required here (not the CLI default 127.0.0.1),
 # since otherwise the server only accepts connections from inside the
@@ -119,9 +131,9 @@ sleep 1
 # docker run --rm -it \
 #   -p 6080:6080 \
 #   -v "$(pwd)/downloads:/app/downloads" \
-#   -v "$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac" \
+#   -v "$(pwd)/.spotiflac_docker:/home/mornye/.mornye" \
 #   --shm-size=1g \
-#   spotiflac "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
+#   mornye "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" \
 #   /app/downloads -s amazon -v
 # ==============================================================================
 
@@ -144,18 +156,18 @@ fi
 export TS_DEBUG_VISIBLE=1
 
 if [ "$#" -eq 0 ]; then
-  echo "SpotiFLAC Docker image: pass a URL and output directory as arguments,"
-  echo "or run the web GUI with: spotiflac --web --host 0.0.0.0 --port 8000"
+  echo "Mornye Docker image: pass a URL and output directory as arguments,"
+  echo "or run the web GUI with: mornye --web --host 0.0.0.0 --port 8000"
   echo "Example (CLI download):"
   echo "  docker run --rm -it \\"
   echo "    -p 6080:6080 \\"
   echo "    -v \"\$(pwd)/downloads:/app/downloads\" \\"
-  echo "    -v \"\$(pwd)/.spotiflac_docker:/home/spotiflac/.spotiflac\" \\"
+  echo "    -v \"\$(pwd)/.spotiflac_docker:/home/mornye/.mornye\" \\"
   echo "    --shm-size=1g \\"
-  echo "    spotiflac \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
+  echo "    mornye \"https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT\" \\"
   echo "    /app/downloads -s amazon -v"
   echo
-  exec spotiflac --help
+  exec mornye --help
 fi
 
 exec python /app/launcher.py "$@"

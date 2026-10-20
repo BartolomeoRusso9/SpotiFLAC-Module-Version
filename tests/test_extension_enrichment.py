@@ -16,15 +16,15 @@ from types import SimpleNamespace
 
 import pytest
 
-import SpotiFLAC.core.extension_enrichment as ext_enrich
-import SpotiFLAC.core.metadata_enrichment as me
-from SpotiFLAC.core.extension_enrichment import (
+import mornye.core.extension_enrichment as ext_enrich
+import mornye.core.metadata_enrichment as me
+from mornye.core.extension_enrichment import (
     enriched_from_track,
     extensions_for_service,
     fetch_extension_enrichment,
 )
-from SpotiFLAC.core.metadata_enrichment import EnrichedMetadata
-from SpotiFLAC.extensions.manager import InstalledExtension
+from mornye.core.metadata_enrichment import EnrichedMetadata
+from mornye.extensions.manager import InstalledExtension
 
 TIDAL_WEB_TRACK = {
     "name": "Blinding Lights",

@@ -9,7 +9,7 @@ configured — only about what the configuration would look like as a command.
 
 from __future__ import annotations
 
-from SpotiFLAC.core.cli_preview import build_command_parts, format_command
+from mornye.core.cli_preview import build_command_parts, format_command
 
 _BASE_CFG = {
     "url": "https://open.spotify.com/track/abc123",
@@ -59,7 +59,7 @@ def test_a_flag_keeps_its_values_on_one_line() -> None:
 
     assert "-s ext:tidal-web" in lines
     assert "--lyrics-providers apple lrclib" in lines
-    assert lines[0].startswith("spotiflac https://open.spotify.com/track/abc123")
+    assert lines[0].startswith("mornye https://open.spotify.com/track/abc123")
 
 
 def test_the_rendered_command_still_parses_as_a_shell_line() -> None:

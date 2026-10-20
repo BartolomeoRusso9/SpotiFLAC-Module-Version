@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "SpotiFLAC"
-version = "5.0.6"
-description = "Fetch Spotify track metadata and retrieve matching lossless audio through configurable Tidal, Qobuz & Amazon Music provider backends."
+name = "mornye-python"
+version = "1.0.0"
+description = "A Python module for Spotify metadata and user-configured music-provider extensions."
 readme = "README.md"
 # 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
 # pydantic BaseModels under `from __future__ import annotations`, and pydantic
 # resolves those annotations at runtime — on 3.9 that raises unless the
-# optional eval-type-backport package is installed, so `import SpotiFLAC`
+# optional eval-type-backport package is installed, so `import mornye`
 # fails outright. 3.10 is also what the classifiers, black, mypy and the CI
 # matrix have always targeted; only this line said otherwise.
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ authors = [
 
 keywords = [
     "spotify", "flac", "downloader", "music", "lossless", "lossless-music",
-    "tidal", "qobuz", "amazon-music", "audio", "SpotiFLAC", "spotify-downloader",
+    "tidal", "qobuz", "amazon-music", "audio", "mornye", "spotify-metadata",
     "no-account", "hi-res"
 ]
 
@@ -63,7 +63,7 @@ dependencies = [
     # 6.7.0–6.9.0 leak references in items-view union/subtraction.
     "multidict>=6.9.1",
     # Base, not an extra: --verify-hires used to be a flag that silently did
-    # nothing unless you had also installed SpotiFLAC[hires]. That extra
+    # nothing unless you had also installed `mornye-python[hires]`. That extra
     # pulled librosa, and with it numba, llvmlite, scipy and scikit-learn —
     # some 346 MB to use six functions. core/hires_check.py now does the
     # analysis on numpy and soundfile directly (verified verdict-for-verdict
@@ -72,7 +72,7 @@ dependencies = [
     "numpy>=1.24.0",
     "soundfile>=0.12.1",
     # Base, not an extra: webapp.py and webapi/routes.py import FastAPI at
-    # module level, so `spotiflac --web` was not a degraded experience
+    # module level, so `mornye --web` was not a degraded experience
     # without it — it was an ImportError. An entry point that cannot start
     # is not an optional feature.
     "fastapi>=0.110.0",
@@ -85,15 +85,15 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"
-"Repository" = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version"
-"Bug Tracker" = "https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/issues"
+"Homepage" = "https://github.com/BartolomeoRusso9/Mornye-Python"
+"Repository" = "https://github.com/BartolomeoRusso9/Mornye-Python"
+"Bug Tracker" = "https://github.com/BartolomeoRusso9/Mornye-Python/issues"
 
 [project.scripts]
-spotiflac = "SpotiFLAC.launcher:main"
+mornye = "mornye.launcher:main"
 
 [tool.setuptools]
-packages = { find = { include = ["SpotiFLAC*"] } }
+packages = { find = { include = ["mornye*"] } }
 include-package-data = true
 
 [tool.setuptools.package-data]
@@ -101,7 +101,7 @@ include-package-data = true
 # annotation in this package for anyone who installs it, which for a library
 # meant to be imported into other projects is most of the value of having
 # written them.
-"SpotiFLAC" = [
+"mornye" = [
     "py.typed",
     "extensions/*.js",
     "extensions/**/*.js",
@@ -124,10 +124,14 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.0",
 ]
+smb = [
+    "smbprotocol>=1.15.0",
+    "keyring>=25.0.0",
+]
 # `web`, `hires` and `dedup` used to live here. Everything they installed is
 # part of the base install now, and pip treats a request for an extra that no
 # longer exists as a warning rather than an error, so an old
-# `pip install 'SpotiFLAC[web]'` still gets a working install.
+# `pip install 'mornye-python[web]'` still gets a working install.
 
 [tool.black]
 line-length = 88
@@ -149,11 +153,11 @@ select = ["E4", "E7", "E9", "F"]
 # comments at each site): a circular-import guard in core/__init__.py,
 # a warnings.filterwarnings() call that must run before the import it's
 # silencing in tools/hires_check_cli.py, and a pytest.importorskip()
-# guard that must run before `from SpotiFLAC import launcher` in the
+# guard that must run before `from mornye import launcher` in the
 # web-flags test (an inline `# noqa` there gets stripped by the release
 # workflow's `ruff check --fix`).
-"SpotiFLAC/core/__init__.py" = ["E402"]
-"SpotiFLAC/tools/hires_check_cli.py" = ["E402"]
+"mornye/core/__init__.py" = ["E402"]
+"mornye/tools/hires_check_cli.py" = ["E402"]
 "tests/test_launcher_web_flags.py" = ["E402"]
 
 [tool.mypy]
@@ -181,8 +185,8 @@ module = ["numpy.*", "soundfile.*"]
 follow_imports = "skip"
 
 [tool.coverage.run]
-source = ["SpotiFLAC"]
+source = ["mornye"]
 omit = [
-    "SpotiFLAC/frontend/*",
+    "mornye/frontend/*",
     "*/__pycache__/*",
 ]

@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.core import db, failed_tracks
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye.app import MornyeAPI
+from mornye.core import db, failed_tracks
+from mornye.core.models import DownloadResult, TrackMetadata
 
 PLAYLIST = "https://open.spotify.com/playlist/p"
 
@@ -63,12 +63,12 @@ def calls(monkeypatch) -> Any:
             )
             return SimpleNamespace()
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeDownloadService)
+    monkeypatch.setattr("mornye.application.DownloadService", FakeDownloadService)
     return seen
 
 
-def _api(tmp_path, tracks: int = 3) -> SpotiFLAC_API:
-    api = SpotiFLAC_API()
+def _api(tmp_path, tracks: int = 3) -> MornyeAPI:
+    api = MornyeAPI()
     api.download_dir = str(tmp_path)
     api.current_tracks = [_track(n) for n in range(tracks)]
     api.current_url = PLAYLIST
@@ -149,7 +149,7 @@ def test_a_job_resumes_after_a_restart_without_the_tracklist(tmp_path, calls) ->
     assert queue is not None
     payload = db.loads(db.dumps(queue.jobs[0][1]))
 
-    after = SpotiFLAC_API()  # empty tracklist, new session
+    after = MornyeAPI()  # empty tracklist, new session
     after.download_dir = str(tmp_path)
     pushed: list[tuple[str, tuple]] = []
     setattr(after, "_push", lambda name, *args: pushed.append((name, args)))
@@ -175,7 +175,7 @@ def test_a_whole_playlist_resumes_as_the_playlist(tmp_path, calls):
     payload = api._download_queue.jobs[0][1]
     assert payload["whole"] is True
 
-    fresh = SpotiFLAC_API()
+    fresh = MornyeAPI()
     fresh.download_dir = str(tmp_path)
     fresh.run_download_job(payload)
     assert calls[-1]["url"] == [PLAYLIST]
@@ -215,7 +215,7 @@ def test_a_batchs_failures_are_listed_with_their_source(tmp_path, monkeypatch):
                 hook(DownloadResult.fail("tidal", "no stream"), _track(1))
             return SimpleNamespace()
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FailingDownloadService)
+    monkeypatch.setattr("mornye.application.DownloadService", FailingDownloadService)
     _api(tmp_path)._download_task([1], {"services": ["tidal"]})
 
     [item] = failed_tracks.list_for()
@@ -226,7 +226,7 @@ def test_a_batchs_failures_are_listed_with_their_source(tmp_path, monkeypatch):
 
 def test_retry_submits_the_missing_tracks_as_a_background_job():
     failed_tracks.hook(source_url=PLAYLIST)(DownloadResult.fail("t", "e"), _track(7))
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     api._download_queue = _RecordingQueue()
 
     assert api.retry_failed_tracks({"services": ["tidal"]}) == {"queued": 1}
@@ -244,11 +244,11 @@ def test_retry_submits_the_missing_tracks_as_a_background_job():
 
 def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch) -> None:
     pytest.importorskip("fastapi")
-    from SpotiFLAC import webapp
+    from mornye import webapp
 
     ran: list[dict] = []
     monkeypatch.setattr(
-        SpotiFLAC_API, "run_download_job", lambda self, payload: ran.append(payload)
+        MornyeAPI, "run_download_job", lambda self, payload: ran.append(payload)
     )
     # What the previous process left behind: its own job, running when it
     # died, next to one a multi-user run left in the same table.
@@ -277,7 +277,7 @@ def test_single_user_web_resumes_a_job_the_last_process_left(monkeypatch) -> Non
 
 def test_multi_user_web_leaves_single_user_jobs_alone():
     pytest.importorskip("fastapi")
-    from SpotiFLAC import webapp
+    from mornye import webapp
 
     with db.transaction() as conn:
         conn.execute(

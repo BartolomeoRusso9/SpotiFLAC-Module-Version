@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core.text_match import titles_match, track_identity_mismatch
+from mornye.core.text_match import titles_match, track_identity_mismatch
 
 
 def _check(**kwargs) -> str:

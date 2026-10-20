@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from SpotiFLAC.core import web_users
-from SpotiFLAC.webapp import create_app
+from mornye.core import web_users
+from mornye.webapp import create_app
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +202,7 @@ def test_an_account_can_read_its_own_quota():
 
 
 def test_a_download_over_quota_is_refused():
-    from SpotiFLAC.core import download_log
+    from mornye.core import download_log
 
     web_users.create_user("bob", "pw", daily_track_quota=1)
     download_log.record(owner="bob", title="Already", file_path="")

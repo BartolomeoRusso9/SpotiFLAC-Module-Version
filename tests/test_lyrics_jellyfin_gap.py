@@ -6,7 +6,7 @@ the result back to its metadata cache. The trim eats the space that separated
 a word from the next, so "Nuij simm doije" reaches every client — Jellify,
 Finamp, the web player — as "Nuijsimmdoije".
 
-SPOTIFLAC_LYRICS_JELLYFIN_COMPAT swaps that separator for U+2800 BRAILLE
+MORNYE_LYRICS_JELLYFIN_COMPAT swaps that separator for U+2800 BRAILLE
 PATTERN BLANK, which draws as a blank but is category So rather than Zs, so
 char.IsWhiteSpace is false for it and Trim() leaves it alone.
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from SpotiFLAC.core.lyrics import JELLYFIN_WORD_GAP, apply_jellyfin_word_gap
+from mornye.core.lyrics import JELLYFIN_WORD_GAP, apply_jellyfin_word_gap
 
 APPLE_LRC = "[00:08.61]<00:08.61>Nuij <00:08.91>simm <00:09.44>doije <00:10.41>stann'"
 

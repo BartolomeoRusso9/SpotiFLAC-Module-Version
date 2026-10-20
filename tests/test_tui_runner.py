@@ -23,15 +23,15 @@ from typing import Any, cast
 
 import pytest
 
-import SpotiFLAC.launcher as launcher_module
+import mornye.launcher as launcher_module
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.core import output_sink
-from SpotiFLAC.core.console import print_run_header, print_track_done
-from SpotiFLAC.core.progress import DownloadManager, safe_tqdm_write
-from SpotiFLAC.tui.app import SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.runner import (
+from mornye.core import output_sink
+from mornye.core.console import print_run_header, print_track_done
+from mornye.core.progress import DownloadManager, safe_tqdm_write
+from mornye.tui.app import MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.runner import (
     FAILED,
     FINISHED,
     OUTPUT,
@@ -58,7 +58,7 @@ async def _fake_download(cfg: dict, log_level: int) -> None:
     await manager.add_to_queue("t1", "Fake Song", "Fake Artist", "Fake Album", "sp1")
     await manager.start_download("t1")
     safe_tqdm_write("  fetching from the provider...")
-    logging.getLogger("SpotiFLAC.test.fake").warning("a warning nobody should see")
+    logging.getLogger("mornye.test.fake").warning("a warning nobody should see")
     for received in (2.0, 6.0, 10.0):
         await manager.update_progress("t1", received, 10.0, 3.5)
     await manager.complete_download("t1", "/tmp/fake.flac", 10.0)
@@ -68,7 +68,7 @@ async def _fake_download(cfg: dict, log_level: int) -> None:
 def _ready_cfg() -> dict:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     ).to_cfg()
 
@@ -182,13 +182,13 @@ async def test_log_records_arrive_even_when_the_package_logger_is_detached(
 ) -> None:
     """The production case, not a corner one.
 
-    `_run_download_async` installs its own console handler on the "SpotiFLAC"
+    `_run_download_async` installs its own console handler on the "Mornye"
     logger and sets `propagate = False` — right for a terminal run, and it
     used to leave the TUI's log pane empty, because a handler on root never
     saw those records again. The runner attaches to both loggers for exactly
     this.
     """
-    package_logger = logging.getLogger("SpotiFLAC")
+    package_logger = logging.getLogger("mornye")
     propagate, level = package_logger.propagate, package_logger.level
     package_logger.propagate = False
     try:
@@ -234,7 +234,7 @@ def test_a_bar_never_contradicts_its_badge() -> None:
     success, and a queued one drew the indeterminate pulse, which reads as
     busy. The badge says what happened — the bar must not say otherwise.
     """
-    from SpotiFLAC.tui.queue_view import TrackRow
+    from mornye.tui.queue_view import TrackRow
 
     class _Bar:
         def __init__(self):
@@ -292,11 +292,11 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
 
     state = ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
-    async with SpotiFLACTui(state).run_test() as pilot:
+    async with MornyeTui(state).run_test() as pilot:
         app_of(pilot).action_start_download()
 
         for _ in range(200):
@@ -304,7 +304,7 @@ async def test_the_queue_panel_fills_from_broadcaster_events(monkeypatch) -> Non
             if not app_of(pilot)._download_running:
                 break
 
-        from SpotiFLAC.tui.queue_view import QueuePanel
+        from mornye.tui.queue_view import QueuePanel
 
         queue = app_of(pilot).query_one("#queue", QueuePanel)
         assert len(queue._rows) == 1
@@ -337,7 +337,7 @@ async def test_the_log_is_a_column_beside_the_panel_when_there_is_room() -> None
     narrower than that silently drops characters out of the middle of every
     path it prints.
     """
-    async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
+    async with MornyeTui().run_test(size=(170, 62)) as pilot:
         app_of(pilot)._set_log_visible(True)
         await pilot.pause()
 
@@ -353,7 +353,7 @@ async def test_the_log_is_a_column_beside_the_panel_when_there_is_room() -> None
 @drives_the_ui
 async def test_a_narrow_terminal_puts_the_log_back_under_the_panel() -> None:
     """Two columns out of 100 cells is two unreadable ones."""
-    async with SpotiFLACTui().run_test(size=(100, 40)) as pilot:
+    async with MornyeTui().run_test(size=(100, 40)) as pilot:
         app_of(pilot)._set_log_visible(True)
         await pilot.pause()
 
@@ -371,7 +371,7 @@ async def test_a_narrow_terminal_puts_the_log_back_under_the_panel() -> None:
 @drives_the_ui
 async def test_the_hidden_log_leaves_the_panel_the_whole_width() -> None:
     """It is off until Ctrl+L or a run turns it on; off should cost nothing."""
-    async with SpotiFLACTui().run_test(size=(170, 62)) as pilot:
+    async with MornyeTui().run_test(size=(170, 62)) as pilot:
         await pilot.pause()
         wide = app_of(pilot).query_one("#panels").size.width
 
@@ -399,7 +399,7 @@ def _queue_item(**overrides) -> dict:
 
 
 def test_the_header_follows_the_track_being_fetched():
-    from SpotiFLAC.tui.queue_view import QueuePanel
+    from mornye.tui.queue_view import QueuePanel
 
     items = [
         _queue_item(id="t1", status="completed", end_time=10.0),
@@ -411,7 +411,7 @@ def test_the_header_follows_the_track_being_fetched():
 
 
 def test_when_nothing_is_running_the_header_holds_the_last_one_done():
-    from SpotiFLAC.tui.queue_view import QueuePanel
+    from mornye.tui.queue_view import QueuePanel
 
     items = [
         _queue_item(id="t1", status="completed", end_time=10.0),
@@ -422,7 +422,7 @@ def test_when_nothing_is_running_the_header_holds_the_last_one_done():
 
 
 def test_before_anything_starts_the_header_shows_the_first_in_the_queue():
-    from SpotiFLAC.tui.queue_view import QueuePanel
+    from mornye.tui.queue_view import QueuePanel
 
     items = [_queue_item(id="t1"), _queue_item(id="t2")]
 
@@ -430,6 +430,6 @@ def test_before_anything_starts_the_header_shows_the_first_in_the_queue():
 
 
 def test_an_empty_queue_has_no_current_track():
-    from SpotiFLAC.tui.queue_view import QueuePanel
+    from mornye.tui.queue_view import QueuePanel
 
     assert QueuePanel._current_item([]) is None

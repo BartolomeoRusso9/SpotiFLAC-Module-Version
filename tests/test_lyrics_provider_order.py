@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import lyrics as L
+from mornye.core import lyrics as L
 
 # Word-level timings inside the line — what Apple gives and lrclib does not.
 APPLE_LRC = "[00:02.64]<00:02.64>Damn, <00:03.24>every <00:03.64>time"

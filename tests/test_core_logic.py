@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.client import AsyncSpotiFLAC
-from SpotiFLAC.core import (
+from mornye.app import MornyeAPI
+from mornye.client import AsyncMornye
+from mornye.core import (
     download_validation,
     ffmpeg_check,
     link_resolver,
@@ -13,26 +13,26 @@ from SpotiFLAC.core import (
     tagger,
     transcode,
 )
-from SpotiFLAC.core.base import BaseProvider
-from SpotiFLAC.core.history import HistoryManager
-from SpotiFLAC.core.isrc_utils import is_valid_isrc, normalize_isrc
-from SpotiFLAC.core.local_scanner import scan_file
-from SpotiFLAC.core.models import (
+from mornye.core.base import BaseProvider
+from mornye.core.history import HistoryManager
+from mornye.core.isrc_utils import is_valid_isrc, normalize_isrc
+from mornye.core.local_scanner import scan_file
+from mornye.core.models import (
     DownloadResult,
     TrackMetadata,
     build_filename,
     sanitize,
 )
-from SpotiFLAC.core.profiles import ProfileConfig
-from SpotiFLAC.core.quality import (
+from mornye.core.profiles import ProfileConfig
+from mornye.core.quality import (
     map_amazon_community_quality,
     normalize_quality,
     quality_fallback_chain,
     quality_for_provider,
 )
-from SpotiFLAC.downloader import DownloadOptions
-from SpotiFLAC.extensions import registry_config
-from SpotiFLAC.extensions.manager import (
+from mornye.downloader import DownloadOptions
+from mornye.extensions import registry_config
+from mornye.extensions.manager import (
     ExtensionManager,
     InstalledExtension,
     RegistryEntry,
@@ -180,7 +180,7 @@ def test_local_scan_uses_plain_filename_as_title_when_no_tags(monkeypatch, tmp_p
         cover_mime = None
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
+        "mornye.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
     )
 
     info = scan_file(file_path)
@@ -199,7 +199,7 @@ def test_local_scan_handles_title_before_artist_in_filename(monkeypatch, tmp_pat
         cover_mime = None
 
     monkeypatch.setattr(
-        "SpotiFLAC.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
+        "mornye.core.local_scanner.read_embedded_tags", lambda _p: FakeEmbedded()
     )
 
     info = scan_file(file_path)
@@ -216,7 +216,7 @@ def test_browse_folder_lists_directories_and_files(tmp_path):
     file_path = base / "track.flac"
     file_path.write_bytes(b"fake-flac-data")
 
-    result = SpotiFLAC_API().browse_folder(str(base))
+    result = MornyeAPI().browse_folder(str(base))
 
     assert nested.name in result["directories"]
     assert file_path.name in result["files"]
@@ -460,7 +460,7 @@ def test_playlist_local_match_normalizes_isrc_and_checks_album(monkeypatch, tmp_
 
 
 def test_fetch_lyrics_respects_explicit_empty_provider_list():
-    from SpotiFLAC.core.lyrics import fetch_lyrics_async
+    from mornye.core.lyrics import fetch_lyrics_async
 
     result = asyncio.run(
         fetch_lyrics_async("Song", "Artist", providers=[]),
@@ -563,7 +563,7 @@ def test_extension_manager_deduplicates_registry_checks_in_one_process(
         monkeypatch.setattr(
             ExtensionManager, "install_from_url", lambda *args, **kwargs: None
         )
-        monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
+        monkeypatch.setenv("MORNYE_REGISTRIES", "https://example.com/registry.json")
 
         manager = ExtensionManager(
             ext_dir=tmp_path / "exts", auto_install_downloads=True
@@ -608,8 +608,8 @@ def _fake_registry(monkeypatch, tmp_path):
     monkeypatch.setattr(
         registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json"
     )
-    monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
-    monkeypatch.delenv("SPOTIFLAC_MIN_TRUST", raising=False)
+    monkeypatch.setenv("MORNYE_REGISTRIES", "https://example.com/registry.json")
+    monkeypatch.delenv("MORNYE_MIN_TRUST", raising=False)
 
     calls = {"fetch": 0, "install": 0}
 
@@ -655,7 +655,7 @@ def test_extension_manager_rechecks_registry_after_interval(
 ):
     """An always-on --web process must pick up new extension versions."""
     ext_dir = tmp_path / "exts"
-    monkeypatch.setenv("SPOTIFLAC_EXT_UPDATE_INTERVAL", "600")
+    monkeypatch.setenv("MORNYE_EXT_UPDATE_INTERVAL", "600")
 
     ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
     ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
@@ -666,7 +666,7 @@ def test_extension_manager_rechecks_registry_after_interval(
     assert _fake_registry == {"fetch": 2, "install": 2}
 
     # Zero restores the old once-per-process behaviour.
-    monkeypatch.setenv("SPOTIFLAC_EXT_UPDATE_INTERVAL", "0")
+    monkeypatch.setenv("MORNYE_EXT_UPDATE_INTERVAL", "0")
     _age_registry_checks(10**6)
     ExtensionManager(ext_dir=ext_dir, auto_install_downloads=True)
     assert _fake_registry["fetch"] == 2
@@ -697,8 +697,8 @@ def test_extension_manager_bootstrap_installs_every_category(monkeypatch, tmp_pa
     monkeypatch.setattr(
         registry_config, "CONFIG_FILE", tmp_path / "registry_settings.json"
     )
-    monkeypatch.setenv("SPOTIFLAC_REGISTRIES", "https://example.com/registry.json")
-    monkeypatch.delenv("SPOTIFLAC_MIN_TRUST", raising=False)
+    monkeypatch.setenv("MORNYE_REGISTRIES", "https://example.com/registry.json")
+    monkeypatch.delenv("MORNYE_MIN_TRUST", raising=False)
 
     def entry(ext_id, category, tags):
         return RegistryEntry(
@@ -802,7 +802,7 @@ def test_base_provider_caches_validated_flac_until_file_changes(tmp_path, monkey
         validations.append(filepath)
         return True, ""
 
-    monkeypatch.setattr("SpotiFLAC.core.base.validate_flac_file", fake_validate)
+    monkeypatch.setattr("mornye.core.base.validate_flac_file", fake_validate)
     provider = DummyProvider()
 
     assert provider._file_exists(path) is True
@@ -815,7 +815,7 @@ def test_base_provider_caches_validated_flac_until_file_changes(tmp_path, monkey
 
 
 def test_async_client_tracks_loop_minutes_and_default_playlist_subfolders():
-    client = AsyncSpotiFLAC(output_dir="./downloads")
+    client = AsyncMornye(output_dir="./downloads")
     assert client._opts.create_playlist_subfolders is False
 
     calls = []
@@ -863,16 +863,16 @@ def test_setup_logger_leaves_a_host_application_s_logging_alone():
     """
     import logging
 
-    from SpotiFLAC.client import _setup_logger
+    from mornye.client import _setup_logger
 
-    package = logging.getLogger("SpotiFLAC")
+    package = logging.getLogger("mornye")
     root = logging.getLogger()
     host = logging.NullHandler()
 
     saved_handlers = list(package.handlers)
     saved_propagate, saved_level = package.propagate, package.level
     # pytest keeps handlers of its own on the root logger, and they would
-    # read as a configured host: this test is about what SpotiFLAC does with
+    # read as a configured host: this test is about what Mornye does with
     # a root it was handed, so it hands it a known one.
     saved_root_handlers = list(root.handlers)
     root.handlers.clear()

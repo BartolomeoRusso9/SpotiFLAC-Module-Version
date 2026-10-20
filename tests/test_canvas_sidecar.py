@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC import downloader as dl
-from SpotiFLAC.core.canvas import Canvas
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye import downloader as dl
+from mornye.core.canvas import Canvas
+from mornye.core.models import DownloadResult, TrackMetadata
 
 PAYLOAD = b"\x00\x00\x00\x18ftypmp42 not really a video"
 CANVAS = Canvas(
@@ -62,8 +62,8 @@ def spotify(monkeypatch):
         state["downloads"] += 1
         return PAYLOAD
 
-    monkeypatch.setattr("SpotiFLAC.core.canvas.fetch_canvas_async", _fetch)
-    monkeypatch.setattr("SpotiFLAC.core.canvas.download_canvas_async", _download)
+    monkeypatch.setattr("mornye.core.canvas.fetch_canvas_async", _fetch)
+    monkeypatch.setattr("mornye.core.canvas.download_canvas_async", _download)
     return state
 
 
@@ -184,7 +184,7 @@ def test_a_download_that_returns_nothing_writes_nothing(audio, spotify, monkeypa
     async def _empty(canvas, *, timeout=20):
         return None
 
-    monkeypatch.setattr("SpotiFLAC.core.canvas.download_canvas_async", _empty)
+    monkeypatch.setattr("mornye.core.canvas.download_canvas_async", _empty)
     _run(audio, save_canvas=True)
 
     assert not audio.with_suffix(".mp4").exists()

@@ -4,7 +4,7 @@ The guided mode. One screen instead of fifteen questions, and the download
 queue live in front of you while it runs.
 
 ```bash
-spotiflac --tui
+mornye --tui
 ```
 
 *(Or `python launcher.py --tui` if running from source.)*
@@ -28,7 +28,7 @@ A sidebar on the left picks the panel; everything else is that panel.
 | **Session** | Recent URLs and saved profiles |
 | **Extensions** | The registry links providers are installed from |
 | **Health** | Whether the lyrics providers are reachable |
-| **Command** | The equivalent `spotiflac …` command, rebuilt as you type |
+| **Command** | The equivalent `mornye …` command, rebuilt as you type |
 
 The log appears when a run starts (`Ctrl+L` toggles it): a column beside the
 panel on a terminal wide enough for one, a strip underneath on anything
@@ -60,7 +60,7 @@ Macchiato, Frappé, Nord, Tokyo Night, Dracula, Gruvbox, Rosé Pine. Every
 colour on the screen is a theme variable, so all nine look deliberate rather
 than one looking right and eight looking tinted.
 
-Everything degrades. `NO_COLOR`, `TERM=dumb`, or `SPOTIFLAC_PLAIN_TUI=1`
+Everything degrades. `NO_COLOR`, `TERM=dumb`, or `MORNYE_PLAIN_TUI=1`
 switch the block art for a word, the box glyphs for ASCII, and the filled
 badges for `[LOSSLESS]`. The wordmark also shrinks on its own: six rows of
 letterform become two on a narrow terminal, and a word below that — a logo
@@ -139,7 +139,7 @@ will not serve.
 
 ### Where downloads land
 
-`~/Music/SpotiFLAC`, the same folder the desktop window uses, unless you type
+`~/Music/Mornye`, the same folder the desktop window uses, unless you type
 somewhere else in **Folder**. It stays the default: a one-off download
 somewhere else does not quietly become where everything goes next.
 
@@ -244,7 +244,7 @@ removes the orphaned ones. The desktop and web GUI show the same list under
 
 ## The Command panel
 
-The `spotiflac …` invocation that would do exactly what the form is set up to
+The `mornye …` invocation that would do exactly what the form is set up to
 do, updated on every change. Only settings that differ from the defaults
 appear, so it stays readable.
 

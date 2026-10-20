@@ -9,7 +9,7 @@ but *inside* the quotes it also treats a backslash as an escape character.
 Quoting alone therefore fixed spaces and broke Windows. Every separator was
 eaten on the way in, so
 
-    C:\\Users\\Bartolomeo\\...\\SpotiFLAC\\extensions\\_netguard.js
+    C:\\Users\\Bartolomeo\\...\\Mornye\\extensions\\_netguard.js
 
 reached Node as `C:UsersBartolomeo..._netguard.js`, and the bridge died at
 startup with MODULE_NOT_FOUND before the extension was ever read — reported
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.runtime import quote_node_option
+from mornye.extensions.runtime import quote_node_option
 
 needs_node = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to check its own parsing"
@@ -51,8 +51,8 @@ def _node_with(node_options: str) -> subprocess.CompletedProcess[str]:
 
 def test_backslashes_are_doubled_and_posix_paths_are_untouched() -> None:
     assert (
-        quote_node_option(r"C:\Users\B\SpotiFLAC\extensions\_netguard.js")
-        == r'"C:\\Users\\B\\SpotiFLAC\\extensions\\_netguard.js"'
+        quote_node_option(r"C:\Users\B\Mornye\extensions\_netguard.js")
+        == r'"C:\\Users\\B\\Mornye\\extensions\\_netguard.js"'
     )
     assert quote_node_option("/opt/a b/_netguard.js") == '"/opt/a b/_netguard.js"'
 
@@ -70,13 +70,13 @@ def _preload_reaches_node(tmp_path: Path, directory: str) -> bool:
 
 @needs_node
 def test_a_path_with_spaces_still_loads(tmp_path: Path) -> None:
-    assert _preload_reaches_node(tmp_path, "Program Files/SpotiFLAC")
+    assert _preload_reaches_node(tmp_path, "Program Files/Mornye")
 
 
 @needs_node
 @pytest.mark.skipif(sys.platform != "win32", reason="only Windows has backslash paths")
 def test_a_windows_path_loads(tmp_path: Path) -> None:  # pragma: no cover
-    assert _preload_reaches_node(tmp_path, "Users/Bartolomeo/SpotiFLAC/extensions")
+    assert _preload_reaches_node(tmp_path, "Users/Bartolomeo/mornye/extensions")
 
 
 @needs_node

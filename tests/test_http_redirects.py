@@ -15,8 +15,8 @@ import asyncio
 import httpx
 import pytest
 
-from SpotiFLAC.core.errors import NetworkError, RedirectNotFollowedError
-from SpotiFLAC.core.http import AsyncHttpClient, _is_worth_retrying
+from mornye.core.errors import NetworkError, RedirectNotFollowedError
+from mornye.core.http import AsyncHttpClient, _is_worth_retrying
 
 
 def _redirect(status: int = 301, location: str = "https://example.invalid/real"):
@@ -77,7 +77,7 @@ def test_a_real_network_error_is_still_retried():
 
 
 def test_a_rate_limit_is_still_retried():
-    from SpotiFLAC.core.errors import RateLimitedError
+    from mornye.core.errors import RateLimitedError
 
     assert _is_worth_retrying(RateLimitedError("t", 5)) is True
 

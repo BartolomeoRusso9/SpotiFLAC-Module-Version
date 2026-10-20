@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC import downloader as dl
-from SpotiFLAC.core.hires_check import HiResCheckResult
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye import downloader as dl
+from mornye.core.hires_check import HiResCheckResult
+from mornye.core.models import DownloadResult, TrackMetadata
 
 TRACK_FILE = "Song - Artist.flac"
 QUARANTINED = TRACK_FILE + dl._FAKE_HIRES_QUARANTINE_SUFFIX
@@ -85,7 +85,7 @@ def _offline(monkeypatch):
     async def no_lookup(isrc):
         return None
 
-    monkeypatch.setattr("SpotiFLAC.core.recording_guard._lookup_isrc_async", no_lookup)
+    monkeypatch.setattr("mornye.core.recording_guard._lookup_isrc_async", no_lookup)
     monkeypatch.setattr(dl, "_schedule_hires_check", lambda *a, **k: None)
 
 

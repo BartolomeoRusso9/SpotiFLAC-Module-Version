@@ -21,9 +21,9 @@ import time
 import types
 from typing import Any, cast
 
-from SpotiFLAC.downloader import _close_shared_browser_sessions
+from mornye.downloader import _close_shared_browser_sessions
 
-_MONO = "SpotiFLAC.core.signed_session_mono"
+_MONO = "mornye.core.signed_session_mono"
 
 
 def _stub(on_close) -> types.ModuleType:

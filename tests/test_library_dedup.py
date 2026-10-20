@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.core import library_dedup as ld
-from SpotiFLAC.core.library_dedup import (
+from mornye.core import library_dedup as ld
+from mornye.core.library_dedup import (
     ACTION_DELETE,
     LibraryFile,
     group_duplicates,
@@ -36,10 +36,8 @@ ffmpeg_required = pytest.mark.skipif(
 
 @pytest.fixture(autouse=True)
 def _isolated_cache(monkeypatch, tmp_path_factory):
-    """The scan cache must not land in the developer's ~/.spotiflac."""
-    monkeypatch.setenv(
-        "SPOTIFLAC_CACHE_DIR", str(tmp_path_factory.mktemp("dedup-cache"))
-    )
+    """The scan cache must not land in the developer's ~/.mornye."""
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path_factory.mktemp("dedup-cache")))
 
 
 def _make_audio(path: Path, *, codec: str, duration: float = 2.0, **tags: str) -> Path:
@@ -493,7 +491,7 @@ def _fake_backend(monkeypatch, prints: dict[str, tuple[int, ...]], *, available=
     """Stands in for Chromaprint, which is an optional dependency the test
     machine may not have. The comparison itself is the real one.
     """
-    from SpotiFLAC.core import audio_fingerprint as af
+    from mornye.core import audio_fingerprint as af
 
     def compute(path):
         raw = prints.get(str(path))
@@ -721,7 +719,7 @@ def test_loading_refuses_a_database_from_another_schema(tmp_path):
 def test_loading_refuses_something_that_is_not_one_of_ours(tmp_path):
     stranger = tmp_path / "not-a.db"
     stranger.write_bytes(b"this is not a database")
-    with pytest.raises(ValueError, match="not a SpotiFLAC dedup database"):
+    with pytest.raises(ValueError, match="not a Mornye dedup database"):
         ld.load_report(stranger)
 
 

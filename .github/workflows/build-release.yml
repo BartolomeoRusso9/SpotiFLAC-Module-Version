@@ -1,4 +1,4 @@
-name: Build and Release SpotiFLAC
+name: Build and Release Mornye
 
 permissions:
   contents: write
@@ -157,23 +157,23 @@ jobs:
         include:
           - os: windows-latest
             arch: x86_64
-            artifact_name: SpotiFLAC-Windows.exe
-            build_name: SpotiFLAC-Windows
+            artifact_name: Mornye-Windows.exe
+            build_name: Mornye-Windows
 
           - os: macos-latest
             arch: x86_64
-            artifact_name: SpotiFLAC-macOS
-            build_name: SpotiFLAC-macOS
+            artifact_name: Mornye-macOS
+            build_name: Mornye-macOS
 
           - os: ubuntu-latest
             arch: x86_64
-            artifact_name: SpotiFLAC-Linux-x86_64
-            build_name: SpotiFLAC-Linux-x86_64
+            artifact_name: Mornye-Linux-x86_64
+            build_name: Mornye-Linux-x86_64
 
           - os: ubuntu-latest
             arch: arm64
-            artifact_name: SpotiFLAC-Linux-arm64
-            build_name: SpotiFLAC-Linux-arm64
+            artifact_name: Mornye-Linux-arm64
+            build_name: Mornye-Linux-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -197,21 +197,20 @@ jobs:
         pip install pyinstaller certifi requests mutagen
         pip install .
 
-    - name: Build SpotiFLAC (x86_64 / macOS / Linux)
+    - name: Build Mornye (x86_64 / macOS / Linux)
       if: matrix.arch == 'x86_64'
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then SEP=";"; else SEP=":"; fi
-        cd SpotiFLAC
         pyinstaller --onefile --name "${{ matrix.build_name }}" \
-          --collect-all SpotiFLAC \
-          --add-data "frontend${SEP}SpotiFLAC/frontend" \
-          --add-data "extensions${SEP}SpotiFLAC/extensions" \
-          --add-data "tui${SEP}SpotiFLAC/tui" \
-          --hidden-import SpotiFLAC.core.signed_session_desktop \
-          --hidden-import SpotiFLAC.core.signed_session_mobile \
-          --hidden-import SpotiFLAC.core.signed_session_mono \
-          --console ../launcher.py
+          --collect-all mornye \
+          --add-data "mornye/frontend${SEP}mornye/frontend" \
+          --add-data "mornye/extensions${SEP}mornye/extensions" \
+          --add-data "mornye/tui${SEP}mornye/tui" \
+          --hidden-import mornye.core.signed_session_desktop \
+          --hidden-import mornye.core.signed_session_mobile \
+          --hidden-import mornye.core.signed_session_mono \
+          --console launcher.py
 
     - name: Setup QEMU for ARM64
       if: matrix.arch == 'arm64'
@@ -230,23 +229,22 @@ jobs:
             pip install --upgrade pip && \
             pip install pyinstaller certifi requests mutagen && \
             pip install . && \
-            cd SpotiFLAC && \
             pyinstaller --onefile --name '${{ matrix.build_name }}' \
-              --collect-all SpotiFLAC \
-              --add-data 'frontend:SpotiFLAC/frontend' \
-              --add-data 'extensions:SpotiFLAC/extensions' \
-              --add-data 'tui:SpotiFLAC/tui' \
-              --hidden-import SpotiFLAC.core.signed_session_desktop \
-              --hidden-import SpotiFLAC.core.signed_session_mobile \
-              --hidden-import SpotiFLAC.core.signed_session_mono \
-              --console ../launcher.py
+              --collect-all mornye \
+              --add-data 'mornye/frontend:mornye/frontend' \
+              --add-data 'mornye/extensions:mornye/extensions' \
+              --add-data 'mornye/tui:mornye/tui' \
+              --hidden-import mornye.core.signed_session_desktop \
+              --hidden-import mornye.core.signed_session_mobile \
+              --hidden-import mornye.core.signed_session_mono \
+              --console launcher.py
           "
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: bin-${{ matrix.build_name }}
-        path: SpotiFLAC/dist/${{ matrix.artifact_name }}
+        path: dist/${{ matrix.artifact_name }}
         retention-days: 7
 
   release:
@@ -348,26 +346,26 @@ jobs:
 
             ## Downloads
             
-            [![Windows](https://img.shields.io/badge/Windows-[SPOTIFLAC.EXE]-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-[SPOTIFLAC--macos]-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-macOS) [![Linux](https://img.shields.io/badge/Linux-[SPOTIFLAC--linux]-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/SpotiFLAC-Linux-x86_64)
+            [![Windows](https://img.shields.io/badge/Windows-Mornye-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/Mornye-Windows.exe) [![macOS](https://img.shields.io/badge/macOS-Mornye-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/Mornye-macOS) [![Linux](https://img.shields.io/badge/Linux-Mornye-FFB300?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/${{ github.repository }}/releases/download/${{ needs.lint-and-bump.outputs.release_tag }}/Mornye-Linux-x86_64)
 
             <details>
             <summary><b>💻 Usage Instructions</b></summary>
             
             ### Windows (PowerShell or CMD)
             ```cmd
-            SpotiFLAC-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            Mornye-Windows.exe [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
             ```
 
             ### 🍏 macOS
             ```bash
-            chmod +x SpotiFLAC-macOS
-            ./SpotiFLAC-macOS [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            chmod +x Mornye-macOS
+            ./Mornye-macOS [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
             ```
 
             ### 🐧 Linux
             ```bash
-            chmod +x SpotiFLAC-Linux-x86_64
-            ./SpotiFLAC-Linux-x86_64 [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
+            chmod +x Mornye-Linux-x86_64
+            ./Mornye-Linux-x86_64 [https://open.spotify.com/track/](https://open.spotify.com/track/)... ./out --service tidal
             ```
             *(For ARM devices like Raspberry Pi, replace `x86_64` with `arm64`)*
             </details>

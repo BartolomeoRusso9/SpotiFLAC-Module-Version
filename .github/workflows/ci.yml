@@ -52,10 +52,10 @@ jobs:
         # sizeable pre-existing error backlog. Surfaced in the log so it's
         # visible and can be tightened incrementally, without turning every
         # unrelated PR red today.
-        run: mypy SpotiFLAC || true
+        run: mypy mornye || true
 
       - name: Pytest (with coverage)
-        run: pytest -v --cov=SpotiFLAC --cov-report=term-missing --cov-fail-under=30
+        run: pytest -v --cov=mornye --cov-report=term-missing --cov-fail-under=30
 
       - name: Architecture guards
         run: >-
@@ -76,7 +76,7 @@ jobs:
         # before it ships, the cheapest possible net for a codebase with no
         # other JS coverage at all.
         run: |
-          for f in SpotiFLAC/frontend/*.js; do
+          for f in mornye/frontend/*.js; do
             echo "Checking $f"
             node --check "$f"
           done
@@ -131,14 +131,14 @@ jobs:
           context: .
           file: Dockerfile
           load: true
-          tags: spotiflac:ci
+          tags: mornye:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Start web container
         run: |
-          docker run -d --name spotiflac-ci -p 8000:8000 \
-            spotiflac:ci --web --host 0.0.0.0 --port 8000
+          docker run -d --name mornye-ci -p 8000:8000 \
+            mornye:ci --web --host 0.0.0.0 --port 8000
 
       - name: Check health endpoint
         run: |
@@ -148,11 +148,11 @@ jobs:
             fi
             sleep 2
           done
-          docker logs spotiflac-ci
+          docker logs mornye-ci
           exit 1
 
       - name: Stop container cleanly
         if: always()
         run: |
-          docker stop --time 15 spotiflac-ci
-          test "$(docker inspect --format '{{.State.ExitCode}}' spotiflac-ci)" = 143
+          docker stop --time 15 mornye-ci
+          test "$(docker inspect --format '{{.State.ExitCode}}' mornye-ci)" = 143

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from SpotiFLAC.core.apple_music_metadata import AppleMusicMetadataClient
+from mornye.core.apple_music_metadata import AppleMusicMetadataClient
 
 
 def _song(song_id: str = "100", disc: int = 1) -> dict:

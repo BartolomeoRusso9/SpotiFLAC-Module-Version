@@ -3,7 +3,7 @@
 Extensions are third-party JavaScript running with the user's own
 permissions. Nothing stopped one writing to a shell profile, to
 ~/.ssh/authorized_keys, or — most pointedly — to
-~/.spotiflac/trusted_keys.json, the Ed25519 root of trust that decides
+~/.mornye/trusted_keys.json, the Ed25519 root of trust that decides
 which registry entries count as signed. An extension that can add a key
 there can sign its own successors, defeating the signing scheme entirely.
 
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-EXTENSIONS = Path(__file__).resolve().parents[1] / "SpotiFLAC" / "extensions"
+EXTENSIONS = Path(__file__).resolve().parents[1] / "Mornye" / "extensions"
 FSGUARD = EXTENSIONS / "_fsguard.js"
 NETGUARD = EXTENSIONS / "_netguard.js"
 
@@ -98,7 +98,7 @@ def test_the_trust_store_cannot_be_written(extdir, scratch) -> None:
     """The sharpest case: writing here lets an extension sign its own
     successors.
     """
-    target = Path.home() / ".spotiflac" / "trusted_keys.json"
+    target = Path.home() / ".mornye" / "trusted_keys.json"
     assert _write(target, cwd=extdir, tmpdir=scratch) == "blocked"
 
 
@@ -138,7 +138,7 @@ def test_configured_directories_are_permitted(extdir, scratch, tmp_path) -> None
         downloads / "x.flac",
         cwd=extdir,
         tmpdir=scratch,
-        env={"SPOTIFLAC_EXT_WRITABLE_DIRS": str(downloads)},
+        env={"MORNYE_EXT_WRITABLE_DIRS": str(downloads)},
     )
     assert result == "written"
 
@@ -155,7 +155,7 @@ def test_the_host_can_sanction_a_path_at_run_time(extdir, scratch, tmp_path) -> 
 
     sanctioning = textwrap.dedent("""
         const fs = require('fs');
-        global.__spotiflacAllowWrite(process.argv[1]);
+        global.__mornyeAllowWrite(process.argv[1]);
         try { fs.writeFileSync(process.argv[1], 'x'); console.log('written'); }
         catch (e) { console.log('blocked'); }
         """)
@@ -169,7 +169,7 @@ def test_the_opt_out_disables_the_guard(extdir, scratch, tmp_path) -> None:
         other / "x",
         cwd=extdir,
         tmpdir=scratch,
-        env={"SPOTIFLAC_EXT_ALLOW_ANY_WRITE": "1"},
+        env={"MORNYE_EXT_ALLOW_ANY_WRITE": "1"},
     )
     assert result == "written"
 
@@ -215,20 +215,20 @@ def test_the_bridge_sanctions_the_download_path() -> None:
     exists to perform.
     """
     bridge = (EXTENSIONS / "_bridge.js").read_text()
-    assert "__spotiflacAllowWrite" in bridge
+    assert "__mornyeAllowWrite" in bridge
 
 
 def test_the_opt_outs_survive_the_environment_sandbox() -> None:
-    from SpotiFLAC.extensions.sandbox import build_env
+    from mornye.extensions.sandbox import build_env
 
     env = build_env(
         {
-            "SPOTIFLAC_EXT_ALLOW_ANY_WRITE": "1",
-            "SPOTIFLAC_EXT_WRITABLE_DIRS": "/tmp/x",
+            "MORNYE_EXT_ALLOW_ANY_WRITE": "1",
+            "MORNYE_EXT_WRITABLE_DIRS": "/tmp/x",
         }
     )
-    assert env.get("SPOTIFLAC_EXT_ALLOW_ANY_WRITE") == "1"
-    assert env.get("SPOTIFLAC_EXT_WRITABLE_DIRS") == "/tmp/x"
+    assert env.get("MORNYE_EXT_ALLOW_ANY_WRITE") == "1"
+    assert env.get("MORNYE_EXT_WRITABLE_DIRS") == "/tmp/x"
 
 
 def test_the_probe_itself_is_not_vacuous(extdir, tmp_path) -> None:
@@ -267,7 +267,7 @@ def test_a_registration_in_the_worker_does_not_reach_the_main_thread(
         const fs = require('fs');
         const target = {str(target)!r};
         const w = new Worker(
-          "global.__spotiflacAllowWrite(" + JSON.stringify(target) + ");" +
+          "global.__mornyeAllowWrite(" + JSON.stringify(target) + ");" +
           "require('worker_threads').parentPort.postMessage('done');",
           {{ eval: true }}
         );
@@ -292,7 +292,7 @@ def test_the_bridge_sanctions_the_path_where_the_write_happens() -> None:
         r"function nodeFileDownload\([^)]*\)\s*\{(.*?)\n\}", bridge, re.DOTALL
     )
     assert match, "nodeFileDownload is not where this test expects it"
-    assert "__spotiflacAllowWrite" in match.group(
+    assert "__mornyeAllowWrite" in match.group(
         1
     ), "the main thread writes the file but never sanctions its path"
 

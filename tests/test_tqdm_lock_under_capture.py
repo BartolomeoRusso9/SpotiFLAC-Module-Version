@@ -39,7 +39,7 @@ SCRIPT = textwrap.dedent("""
     sys.stderr = Capture()
     sys.path.insert(0, sys.argv[1])
     try:
-        from SpotiFLAC.core.progress import ProgressManager
+        from mornye.core.progress import ProgressManager
 
         ProgressManager.initialize_master_bar(1, description="Progress")
         ProgressManager.clear_master_bar()

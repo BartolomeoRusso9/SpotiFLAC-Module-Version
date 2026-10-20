@@ -15,10 +15,10 @@ from typing import Any, cast
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.core import spotfetch
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from mornye.app import MornyeAPI
+from mornye.core import spotfetch
+from mornye.core.models import TrackMetadata
+from mornye.downloader import DownloadOptions, MornyeDownloader
 from tests.application_download_capture import capture_service
 
 PLAYLIST = "https://open.spotify.com/playlist/abc"
@@ -45,7 +45,7 @@ def download(tmp_path, monkeypatch) -> Any:
     capture_service(monkeypatch, seen)
 
     def _run(indices, url=PLAYLIST, tracks=None):
-        api = SpotiFLAC_API()
+        api = MornyeAPI()
         api.download_dir = str(tmp_path)
         api.current_tracks = (
             tracks if tracks is not None else [_track(n) for n in range(4)]
@@ -92,7 +92,7 @@ def test_a_single_pick_uses_the_metadata_too(download) -> None:
 
 
 def test_the_sync_wrapper_forwards_what_it_is_given(monkeypatch) -> None:
-    from SpotiFLAC import client as client_mod
+    from mornye import client as client_mod
 
     seen: dict = {}
 
@@ -109,9 +109,9 @@ def test_the_sync_wrapper_forwards_what_it_is_given(monkeypatch) -> None:
         async def download_tracks(self, urls, *, loop_minutes=None, prefetched=None):
             seen["prefetched"] = prefetched
 
-    monkeypatch.setattr(client_mod, "AsyncSpotiFLAC", _FakeClient)
+    monkeypatch.setattr(client_mod, "AsyncMornye", _FakeClient)
     known = {"u1": _track(1)}
-    client_mod.SpotiFLAC(
+    client_mod.Mornye(
         url=["u1", "u2"],
         output_dir="/tmp/out",
         batch_tracks=True,
@@ -124,7 +124,7 @@ def test_the_sync_wrapper_forwards_what_it_is_given(monkeypatch) -> None:
 
 
 def test_prefetched_links_are_not_resolved_again(tmp_path, monkeypatch) -> None:
-    downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
     looked_up: list[str] = []
     history: list[tuple] = []
     runs: list[list[str]] = []
@@ -177,7 +177,7 @@ class _FakeCredits:
 
 
 def _composer_of(track: TrackMetadata, tmp_path) -> tuple[str, list[str]]:
-    downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
     credits = _FakeCredits()
     setattr(downloader, "_metadata_client", cast(Any, lambda: credits))
     result = asyncio.run(downloader._with_composer_async(track, asyncio.Semaphore(1)))
@@ -206,7 +206,7 @@ def test_composer_and_disc_come_from_the_cache_without_a_request(monkeypatch) ->
     cached = {"t1": {"composer": "Writer", "disc_number": 2}}
     monkeypatch.setattr(spotfetch, "peek_native_track_metadata", cached.get)
 
-    filled = SpotiflacDownloader._fill_from_native_cache([_track(1), _track(2)])
+    filled = MornyeDownloader._fill_from_native_cache([_track(1), _track(2)])
 
     assert (filled[0].composer, filled[0].disc_number) == ("Writer", 2)
     # Nothing cached for t2: left as it was, and no lookup made for it.
@@ -221,4 +221,4 @@ def test_what_a_track_already_has_is_not_overwritten(monkeypatch) -> None:
     )
     track = _track(1, composer="Mine", disc_number=2)
 
-    assert SpotiflacDownloader._fill_from_native_cache([track])[0] is track
+    assert MornyeDownloader._fill_from_native_cache([track])[0] is track

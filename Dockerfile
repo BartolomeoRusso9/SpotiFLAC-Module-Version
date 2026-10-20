@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies:
 # - ffmpeg and flac: for audio processing
-# - nodejs: for SpotiFLAC extensions
+# - nodejs: for Mornye extensions
 # - xvfb: to create the virtual display (MANDATORY for Chromium even without VNC)
 # - chromium and fonts-liberation: browser for Pydoll and web fonts
 # - tini: PID 1 that reaps orphaned processes (see ENTRYPOINT below)
@@ -57,30 +57,30 @@ RUN python3 -m pip install --no-cache-dir .
 #   docker build --build-arg APP_UID=1234 --build-arg APP_GID=1234 .
 ARG APP_UID=1000
 ARG APP_GID=1000
-ENV HOME=/home/spotiflac
+ENV HOME=/home/mornye
 
-RUN groupadd --gid "${APP_GID}" spotiflac \
+RUN groupadd --gid "${APP_GID}" mornye \
     && useradd --uid "${APP_UID}" --gid "${APP_GID}" \
-        --create-home --home-dir "${HOME}" spotiflac \
+        --create-home --home-dir "${HOME}" mornye \
     && mkdir -p /app/downloads \
-                "${HOME}/.spotiflac/extensions" \
-                "${HOME}/.spotiflac/signed_sessions" \
-    && chown -R spotiflac:spotiflac /app "${HOME}"
+                "${HOME}/.mornye/extensions" \
+                "${HOME}/.mornye/signed_sessions" \
+    && chown -R mornye:mornye /app "${HOME}"
 
 # ~/.cache/spotiflac is deliberately absent from both the mkdir above and the
-# VOLUME below. The cache moved under ~/.spotiflac/.cache (see core/paths.py),
+# VOLUME below. The cache moved under ~/.mornye/.cache (see core/paths.py),
 # so nothing writes to the old path any more; core.paths.adopt_legacy_cache_file
 # still *reads* it, but that needs no directory to exist and no volume. Leaving
 # it declared here cost a stray anonymous volume on every container that did
 # not explicitly mount over it.
-VOLUME ["/app/downloads", "/home/spotiflac/.spotiflac"]
+VOLUME ["/app/downloads", "/home/mornye/.mornye"]
 
 # ==============================================================================
-# [VNC/WEB SCREEN] — desktop GUI over VNC (default `spotiflac --gui` path):
+# [VNC/WEB SCREEN] — desktop GUI over VNC (default `mornye --gui` path):
 # - 6080: Web Browser access (noVNC) -> http://localhost:6080/vnc.html
 # - 5900: Classic VNC client access (e.g., RealVNC, TigerVNC)
 #
-# [WEB MODE] — `spotiflac --web` (see docker-entrypoint.sh): no VNC needed,
+# [WEB MODE] — `mornye --web` (see docker-entrypoint.sh): no VNC needed,
 # uses a lightweight local web server instead.
 # - 8000: web GUI -> http://localhost:8000
 # ==============================================================================
@@ -98,7 +98,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Last, and after the chmod above: /usr/local/bin is root-owned, so dropping
 # privileges any earlier makes that RUN fail and the image fail to build.
-USER spotiflac
+USER mornye
 
 # tini as PID 1. The entrypoint execs python, which would otherwise be PID 1 —
 # and PID 1 is who inherits every orphan. core/solver.py ends a Turnstile

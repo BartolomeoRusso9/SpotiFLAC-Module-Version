@@ -12,14 +12,14 @@ import re
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
 TestClient = fastapi_testclient.TestClient
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    from SpotiFLAC.extensions import directories, trust
+    from mornye.extensions import directories, trust
 
     monkeypatch.setattr(
         directories, "CONFIG_FILE", tmp_path / "directory_settings.json"
@@ -57,7 +57,7 @@ def test_the_status_line_has_somewhere_to_land(client) -> None:
 
 def test_the_parallel_downloads_setting_is_wired_end_to_end(client) -> None:
     """The GUI had no equivalent of --max-concurrent, so every download ran
-    at client.SpotiFLAC's default of 2. The control is only worth having if
+    at client.Mornye's default of 2. The control is only worth having if
     buildConfig() reads it and load_settings() puts it back.
     """
     html = client.get("/").text
@@ -203,7 +203,7 @@ def test_the_dashboard_and_csv_import_are_in_the_page(client) -> None:
 
 
 def test_the_dashboard_round_trips_over_http(client) -> None:
-    from SpotiFLAC.core import download_log
+    from mornye.core import download_log
 
     download_log.record(
         title="Song", artist="Queen", provider="ext:tidal-web", genre="Rock"

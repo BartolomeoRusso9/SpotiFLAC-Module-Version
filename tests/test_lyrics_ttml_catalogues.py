@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import lyrics as L
+from mornye.core import lyrics as L
 
 TTML = (
     '<tt xmlns="http://www.w3.org/ns/ttml"'

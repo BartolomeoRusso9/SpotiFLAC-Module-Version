@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core.metadata_enrichment import _APPLE_MATCH_MIN
-from SpotiFLAC.core.text_match import (
+from mornye.core.metadata_enrichment import _APPLE_MATCH_MIN
+from mornye.core.text_match import (
     TITLE_FLOOR,
     score_track_match,
 )

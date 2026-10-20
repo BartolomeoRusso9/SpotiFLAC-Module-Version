@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core import node_check
-from SpotiFLAC.extensions.runtime import ExtensionRuntimeError, JSRuntime
+from mornye.core import node_check
+from mornye.extensions.runtime import ExtensionRuntimeError, JSRuntime
 
 
 def test_start_attempts_auto_install_when_node_missing(monkeypatch, tmp_path) -> None:
@@ -21,7 +21,7 @@ def test_start_attempts_auto_install_when_node_missing(monkeypatch, tmp_path) ->
         calls.append(node_executable)
         return {"available": False, "version": "", "error": "induced failure"}
 
-    monkeypatch.setattr("SpotiFLAC.extensions.runtime.shutil.which", lambda _name: None)
+    monkeypatch.setattr("mornye.extensions.runtime.shutil.which", lambda _name: None)
     monkeypatch.setattr(node_check, "ensure_node_installed", fake_ensure_node_installed)
 
     rt = JSRuntime(ext_path=tmp_path / "does-not-matter.js")
@@ -43,7 +43,7 @@ def test_start_proceeds_past_node_check_when_auto_install_succeeds(
     doesn't exist so start() still stops (safely, before ever spawning a
     real Node subprocess) but for a *different*, later reason.
     """
-    monkeypatch.setattr("SpotiFLAC.extensions.runtime.shutil.which", lambda _name: None)
+    monkeypatch.setattr("mornye.extensions.runtime.shutil.which", lambda _name: None)
     monkeypatch.setattr(
         node_check,
         "ensure_node_installed",

@@ -19,8 +19,8 @@ from textual.widgets import Input, Select, Static
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
 
 _DOWNLOAD_INDEX = [key for key, _ in MODES].index("download")
 
@@ -36,7 +36,7 @@ _SAVED_PROFILE = {
 
 @pytest.fixture
 def stub_profiles(monkeypatch) -> Any:
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.profiles as profiles_module
 
     saved: dict[str, dict] = {
         "weekend": dict(_SAVED_PROFILE),
@@ -56,7 +56,7 @@ def stub_profiles(monkeypatch) -> Any:
 
 @pytest.fixture
 def stub_no_profiles(monkeypatch) -> Any:
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.profiles as profiles_module
 
     async def _list():
         return []
@@ -67,7 +67,7 @@ def stub_no_profiles(monkeypatch) -> Any:
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -102,7 +102,7 @@ def _offered_profiles(pilot) -> list[str]:
 
 @drives_the_ui
 async def test_the_saved_profiles_are_offered(stub_profiles) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
         # Read off the menu the widget actually shows, rather than out of
         # Select._options — a private attribute of somebody else's widget,
@@ -113,7 +113,7 @@ async def test_the_saved_profiles_are_offered(stub_profiles) -> None:
 @drives_the_ui
 async def test_it_sits_in_the_configuration_panel(stub_profiles) -> None:
     """Under Destination, not in a panel of its own."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
         panel = app_of(pilot).query_one("#download")
         assert _picker(pilot) in panel.query(Select)
@@ -121,7 +121,7 @@ async def test_it_sits_in_the_configuration_panel(stub_profiles) -> None:
 
 @drives_the_ui
 async def test_with_nothing_saved_it_says_where_to_save_one(stub_no_profiles) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
         said = str(app_of(pilot).query_one("#profile-status", Static).content)
         assert "No profiles saved yet" in said
@@ -132,7 +132,7 @@ async def test_with_nothing_saved_it_says_where_to_save_one(stub_no_profiles) ->
 
 @drives_the_ui
 async def test_picking_one_replaces_every_setting(stub_profiles) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
 
         _picker(pilot).value = "weekend"
@@ -148,7 +148,7 @@ async def test_picking_one_replaces_every_setting(stub_profiles) -> None:
 @drives_the_ui
 async def test_the_form_is_rebuilt_not_just_the_state(stub_profiles) -> None:
     """A control still showing the old profile is the failure this guards."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
 
         _picker(pilot).value = "archive"
@@ -160,7 +160,7 @@ async def test_the_form_is_rebuilt_not_just_the_state(stub_profiles) -> None:
 
 @drives_the_ui
 async def test_the_rebuilt_menu_shows_which_profile_is_loaded(stub_profiles) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
 
         _picker(pilot).value = "weekend"
@@ -183,7 +183,7 @@ async def test_settling_on_the_loaded_profile_does_not_reload_it(
     rebuilt the panel, which set the value again, which loaded again.
     """
     loads: list[str] = []
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.profiles as profiles_module
 
     real_get = profiles_module.get_profile_async
 
@@ -193,7 +193,7 @@ async def test_settling_on_the_loaded_profile_does_not_reload_it(
 
     profiles_module.get_profile_async = _counting_get
     try:
-        async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+        async with MornyeTui(_ready_state()).run_test() as pilot:
             await _settled(pilot)
             _picker(pilot).value = "weekend"
             await _settled(pilot)
@@ -206,7 +206,7 @@ async def test_settling_on_the_loaded_profile_does_not_reload_it(
 
 @drives_the_ui
 async def test_switching_between_two_profiles_works(stub_profiles) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
 
         _picker(pilot).value = "weekend"
@@ -222,17 +222,17 @@ async def test_switching_between_two_profiles_works(stub_profiles) -> None:
 @drives_the_ui
 async def test_an_unreadable_store_leaves_the_form_alone(monkeypatch) -> None:
     """The panel is the settings screen; profiles are a convenience on it."""
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.profiles as profiles_module
 
     async def _boom():
         raise OSError("profiles.json is unreadable")
 
     monkeypatch.setattr(profiles_module, "list_profiles_async", _boom)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         await _settled(pilot)
         assert app_of(pilot).query_one("#cfg-output_dir", Input).value == (
-            "/tmp/spotiflac-test"
+            "/tmp/mornye-test"
         )
         said = str(app_of(pilot).query_one("#profile-status", Static).content)
         assert "unreadable" in said

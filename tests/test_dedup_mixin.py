@@ -4,20 +4,20 @@ fingerprint/grouping logic is covered by tests/test_audio_fingerprint.py.
 
 from __future__ import annotations
 
-from SpotiFLAC.api_mixins.dedup import DedupMixin
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.webapp import ALLOWED_METHODS
+from mornye.api_mixins.dedup import DedupMixin
+from mornye.app import MornyeAPI
+from mornye.webapp import ALLOWED_METHODS
 
 
 def test_dedup_methods_are_web_allowed_and_resolve_to_the_mixin() -> None:
     for name in ("get_dedup_status", "scan_for_duplicates"):
         assert name in ALLOWED_METHODS
         assert name in DedupMixin.__dict__
-        assert getattr(SpotiFLAC_API, name).__qualname__.startswith("DedupMixin.")
+        assert getattr(MornyeAPI, name).__qualname__.startswith("DedupMixin.")
 
 
 def test_get_dedup_status_shape() -> None:
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     status = api.get_dedup_status()
     assert "available" in status
     assert isinstance(status["available"], bool)
@@ -26,7 +26,7 @@ def test_get_dedup_status_shape() -> None:
 
 
 def test_scan_for_duplicates_rejects_missing_path() -> None:
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     assert api.scan_for_duplicates("") == {
         "status": "error",
         "error": "No path given",
@@ -34,7 +34,7 @@ def test_scan_for_duplicates_rejects_missing_path() -> None:
 
 
 def test_scan_for_duplicates_rejects_nonexistent_path() -> None:
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     result = api.scan_for_duplicates("/this/does/not/exist/anywhere")
     assert result["status"] == "error"
     assert "does not exist" in result["error"]
@@ -53,7 +53,7 @@ def test_scan_for_duplicates_rejects_path_outside_approved_roots() -> None:
     except ValueError:
         pass
 
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     result = api.scan_for_duplicates("/etc")
     assert result["status"] == "error"
     assert "Access denied" in result["error"]
@@ -103,8 +103,8 @@ def _make_audio(path: Path, *, codec: str, **tags: str) -> Path:
 def api_on(tmp_path, monkeypatch):
     """An API instance whose approved root is a throwaway folder, with its
     push events captured instead of sent."""
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
-    api = SpotiFLAC_API()
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "cache"))
+    api = MornyeAPI()
     api.download_dir = str(tmp_path)
     api.pushed = []
     api._push = lambda name, *args: api.pushed.append((name, args[0] if args else None))
@@ -119,11 +119,11 @@ def test_library_dedup_methods_are_web_allowed_and_resolve_to_the_mixin() -> Non
     ):
         assert name in ALLOWED_METHODS
         assert name in DedupMixin.__dict__
-        assert getattr(SpotiFLAC_API, name).__qualname__.startswith("DedupMixin.")
+        assert getattr(MornyeAPI, name).__qualname__.startswith("DedupMixin.")
 
 
 def test_scan_library_duplicates_validates_its_path() -> None:
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     assert api.scan_library_duplicates("")["error"] == "No path given"
     assert "does not exist" in api.scan_library_duplicates("/nope/nowhere")["error"]
 
@@ -137,7 +137,7 @@ def test_scan_library_duplicates_rejects_an_unknown_match_mode(
 
 
 def test_resolving_without_a_scan_says_so() -> None:
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     result = api.resolve_library_duplicates()
     assert result["status"] == "error"
     assert "run a library duplicate scan first" in result["error"]

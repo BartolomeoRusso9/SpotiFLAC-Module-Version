@@ -2,7 +2,7 @@
 
 Extensions are third-party JavaScript from registries, running as an
 ordinary Node subprocess with an ordinary network stack — so without a
-guard one can reach SpotiFLAC's own `--web` server on 127.0.0.1, the LAN,
+guard one can reach Mornye's own `--web` server on 127.0.0.1, the LAN,
 or 169.254.169.254 for cloud credentials in the Docker image the project
 ships. None of that is anything a music provider needs.
 
@@ -23,9 +23,7 @@ from pathlib import Path
 
 import pytest
 
-GUARD = (
-    Path(__file__).resolve().parents[1] / "SpotiFLAC" / "extensions" / "_netguard.js"
-)
+GUARD = Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "_netguard.js"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real preload"
@@ -58,7 +56,7 @@ def _attempt(host: str, port: int = 9, *, guard: bool = True, env=None) -> str:
 @pytest.mark.parametrize(
     ("host", "what"),
     [
-        ("127.0.0.1", "loopback — SpotiFLAC's own --web server lives here"),
+        ("127.0.0.1", "loopback — Mornye's own --web server lives here"),
         ("169.254.169.254", "cloud instance metadata"),
         ("192.168.1.1", "a home router"),
         ("10.0.0.1", "RFC1918"),
@@ -100,7 +98,7 @@ def test_the_opt_out_lets_a_self_hosted_service_through() -> None:
     """
     import os
 
-    env = {**os.environ, "SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK": "1"}
+    env = {**os.environ, "MORNYE_EXT_ALLOW_PRIVATE_NETWORK": "1"}
     assert _attempt("127.0.0.1", env=env).startswith("reached")
 
 
@@ -115,7 +113,7 @@ def test_the_opt_out_survives_the_environment_sandbox() -> None:
     """build_env() strips everything not on its allowlist, so the opt-out
     has to be on it or it can never reach the extension.
     """
-    from SpotiFLAC.extensions.sandbox import build_env
+    from mornye.extensions.sandbox import build_env
 
-    env = build_env({"SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK": "1"})
-    assert env.get("SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK") == "1"
+    env = build_env({"MORNYE_EXT_ALLOW_PRIVATE_NETWORK": "1"})
+    assert env.get("MORNYE_EXT_ALLOW_PRIVATE_NETWORK") == "1"

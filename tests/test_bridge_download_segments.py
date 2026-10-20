@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.runtime import JSRuntime
+from mornye.extensions.runtime import JSRuntime
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real bridge"
@@ -97,8 +97,8 @@ registerExtension({
 def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # The guards are the real ones: loopback is reachable only with the
     # documented opt-out, and the output directory has to be sanctioned.
-    monkeypatch.setenv("SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK", "1")
-    monkeypatch.setenv("SPOTIFLAC_EXT_WRITABLE_DIRS", str(tmp_path))
+    monkeypatch.setenv("MORNYE_EXT_ALLOW_PRIVATE_NETWORK", "1")
+    monkeypatch.setenv("MORNYE_EXT_WRITABLE_DIRS", str(tmp_path))
     ext = tmp_path / "probe.js"
     ext.write_text(EXTENSION)
     rt = JSRuntime(ext)

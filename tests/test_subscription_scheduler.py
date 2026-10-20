@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import threading
 
-from SpotiFLAC.core import subscriptions as subs
-from SpotiFLAC.core.subscription_scheduler import SubscriptionScheduler
+from mornye.core import subscriptions as subs
+from mornye.core.subscription_scheduler import SubscriptionScheduler
 
 PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 ARTIST_URL = "https://open.spotify.com/artist/0000000000000000000000"

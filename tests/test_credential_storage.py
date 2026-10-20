@@ -1,5 +1,5 @@
 """Storage hardening for the two files that hold trust material:
-~/.spotiflac/web_users.json (account hashes) and trusted_keys.json (the
+~/.mornye/web_users.json (account hashes) and trusted_keys.json (the
 Ed25519 root of trust for extension signatures).
 
 Both used to be written with a plain write_text(), which truncates the
@@ -17,9 +17,9 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import web_users
-from SpotiFLAC.core.atomic_io import write_json_atomic, write_private_json
-from SpotiFLAC.extensions import trust
+from mornye.core import web_users
+from mornye.core.atomic_io import write_json_atomic, write_private_json
+from mornye.extensions import trust
 
 
 @pytest.fixture(autouse=True)

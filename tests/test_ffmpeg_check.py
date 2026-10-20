@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import subprocess
 
-from SpotiFLAC.core import ffmpeg_check
+from mornye.core import ffmpeg_check
 
 
 class _FakeCompletedProcess:

@@ -19,7 +19,7 @@ import shutil
 
 import pytest
 
-from SpotiFLAC.core.replaygain import (
+from mornye.core.replaygain import (
     REFERENCE_LUFS,
     ReplayGainResult,
     _parse_loudnorm,
@@ -108,7 +108,7 @@ def test_a_missing_ffmpeg_is_not_an_error(monkeypatch, tmp_path) -> None:
     """A track with no ReplayGain tags plays; a download that failed because
     ffmpeg was absent does not.
     """
-    monkeypatch.setattr("SpotiFLAC.core.replaygain.shutil.which", lambda _n: None)
+    monkeypatch.setattr("mornye.core.replaygain.shutil.which", lambda _n: None)
     assert asyncio.run(analyse_async(tmp_path / "x.flac")) is None
 
 
@@ -146,8 +146,8 @@ def test_real_audio_is_measured_and_tagged(tmp_path) -> None:
 
     from mutagen.flac import FLAC
 
-    from SpotiFLAC.core.models import TrackMetadata
-    from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+    from mornye.core.models import TrackMetadata
+    from mornye.core.tagger import EmbedOptions, embed_metadata_async
 
     path = tmp_path / "tone.flac"
     subprocess.run(
@@ -179,6 +179,6 @@ def test_replaygain_is_off_unless_asked_for(tmp_path) -> None:
     """The analysis decodes the whole file. Nobody should pay for it by
     default.
     """
-    from SpotiFLAC.core.tagger import EmbedOptions
+    from mornye.core.tagger import EmbedOptions
 
     assert EmbedOptions().replaygain is False

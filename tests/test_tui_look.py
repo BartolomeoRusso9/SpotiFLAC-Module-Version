@@ -12,16 +12,16 @@ from __future__ import annotations
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui import branding
-from SpotiFLAC.tui.app import THEMES, SpotiFLACTui
-from SpotiFLAC.tui.banner import Banner, HintBar
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.tui import branding
+from mornye.tui.app import THEMES, MornyeTui
+from mornye.tui.banner import Banner, HintBar
+from mornye.tui.config_state import ConfigState
 
 
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -73,7 +73,7 @@ def test_a_plain_terminal_gets_no_block_art() -> None:
 
 
 def test_plain_terminal_follows_no_color(monkeypatch) -> None:
-    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)
+    monkeypatch.delenv("MORNYE_PLAIN_TUI", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.delenv("NO_COLOR", raising=False)
     assert branding.plain_terminal() is False
@@ -92,7 +92,7 @@ def test_a_windows_console_is_not_a_dumb_terminal(monkeypatch) -> None:
     """
     monkeypatch.delenv("TERM", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)
+    monkeypatch.delenv("MORNYE_PLAIN_TUI", raising=False)
 
     monkeypatch.setattr(branding.sys, "platform", "win32")
     assert branding.plain_terminal() is False
@@ -166,9 +166,9 @@ async def test_every_panel_tag_actually_draws() -> None:
     """Asserting the attribute is set was not enough — it was, and was wrong."""
     import re
 
-    from SpotiFLAC.tui.app import MODES
+    from mornye.tui.app import MODES
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(104, 36)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(104, 36)) as pilot:
         keys = [key for key, _label in MODES]
         for key in keys:
             app_of(pilot).query_one("#sidebar").index = keys.index(key)
@@ -225,7 +225,7 @@ def test_the_key_is_the_coloured_part_of_a_hint() -> None:
 
 @drives_the_ui
 async def test_the_default_theme_is_the_one_the_screen_was_drawn_against() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         assert app_of(pilot).theme == "catppuccin-mocha"
 
 
@@ -239,7 +239,7 @@ def test_every_offered_theme_exists() -> None:
 
 @drives_the_ui
 async def test_the_banner_and_hint_bar_replace_the_default_chrome() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         assert isinstance(app_of(pilot).query_one("#banner"), Banner)
         assert isinstance(app_of(pilot).query_one("#hints"), HintBar)
 
@@ -256,7 +256,7 @@ async def test_the_banner_and_hint_bar_replace_the_default_chrome() -> None:
 @drives_the_ui
 async def test_the_banner_leaves_room_for_its_subtitle() -> None:
     """It was sized to the art alone, and the subtitle fell off the bottom."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         banner = app_of(pilot).query_one("#banner", Banner)
         rows = len(branding.WORDMARK_FULL.split("\n"))
         assert banner.size.height >= rows + 1
@@ -264,9 +264,9 @@ async def test_the_banner_leaves_room_for_its_subtitle() -> None:
 
 @drives_the_ui
 async def test_every_panel_is_a_titled_card() -> None:
-    from SpotiFLAC.tui.app import MODES
+    from mornye.tui.app import MODES
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         for key, _label in MODES:
             panel = app_of(pilot).query_one(f"#{key}")
             assert str(panel.border_title).strip(), f"#{key} has no title"
@@ -283,7 +283,7 @@ async def test_a_transient_message_becomes_a_toast() -> None:
     check here is the call. The rendering is verified against a real
     terminal instead.
     """
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         sent: list[dict] = []
         app_of(pilot).notify = lambda message, **kwargs: sent.append(
             {"message": message, **kwargs},
@@ -310,7 +310,7 @@ async def test_a_transient_message_becomes_a_toast() -> None:
 @drives_the_ui
 async def test_a_missing_toast_widget_does_not_leak_labels() -> None:
     """`Toast` is a private Textual class; this must survive it moving."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).notify = lambda message, **kwargs: None
         app_of(pilot)._toast("something happened", "warning")
         assert app_of(pilot)._pending_toast_labels == ["WARNING"]
@@ -325,7 +325,7 @@ async def test_a_missing_toast_widget_does_not_leak_labels() -> None:
 
 @drives_the_ui
 async def test_announcing_says_it_in_both_places() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         sent: list[str] = []
         app_of(pilot).notify = lambda message, **kwargs: sent.append(message)
 
@@ -339,7 +339,7 @@ async def test_announcing_says_it_in_both_places() -> None:
 @drives_the_ui
 async def test_progress_ticks_never_toast() -> None:
     """One toast per progress event would bury what you are watching."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         sent: list[str] = []
         app_of(pilot).notify = lambda message, **kwargs: sent.append(message)
 
@@ -352,7 +352,7 @@ async def test_progress_ticks_never_toast() -> None:
 
 @drives_the_ui
 async def test_a_panes_title_fills_in_when_it_takes_focus() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         sidebar = app_of(pilot).query_one("#sidebar")
         sidebar.focus()
         await pilot.pause()
@@ -371,7 +371,7 @@ async def test_a_panes_title_fills_in_when_it_takes_focus() -> None:
 
 @drives_the_ui
 async def test_the_status_line_is_marked_by_severity() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         status = app_of(pilot).query_one("#status")
 
         app_of(pilot)._set_status("all good", "success")
@@ -387,7 +387,7 @@ async def test_the_status_line_is_marked_by_severity() -> None:
 
 @drives_the_ui
 async def test_the_hint_bar_drops_hints_rather_than_truncating() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(60, 30)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(60, 30)) as pilot:
         bar = app_of(pilot).query_one("#hints", HintBar)
         await pilot.pause()
         # `content` is the markup; what has to fit is the text it renders to.
@@ -401,7 +401,7 @@ async def test_the_hint_bar_drops_hints_rather_than_truncating() -> None:
 
 @drives_the_ui
 async def test_the_quality_badge_follows_the_selected_tier() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         badge = app_of(pilot).query_one("#quality-badge")
         assert "LOSSLESS" in str(badge.content)
         assert badge.has_class("badge-sapphire")
@@ -419,13 +419,13 @@ def test_a_hint_is_valid_markup_in_both_modes(monkeypatch) -> None:
     """`[/]` — the slash hint — is an auto-closing tag to Textual's parser.
 
     Plain mode used to hand the bar its unescaped form, and rendering it
-    raised `MarkupError` before the first frame: `NO_COLOR=1 spotiflac --tui`
+    raised `MarkupError` before the first frame: `NO_COLOR=1 mornye --tui`
     died on startup. The bar renders markup whichever mode it is in, so both
     forms have to be markup.
     """
     from textual.content import Content
 
-    from SpotiFLAC.tui.banner import DEFAULT_HINTS
+    from mornye.tui.banner import DEFAULT_HINTS
 
     for plain in (False, True):
         if plain:

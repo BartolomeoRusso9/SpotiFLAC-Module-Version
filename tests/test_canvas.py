@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import canvas as cv
+from mornye.core import canvas as cv
 
 TRACK_ID = "3OHfY25tqY28d16oZczHc8"
 CANVAS_URL = "https://canvaz.scdn.co/upload/artist/abc/video/deadbeef.cnvs.mp4"
@@ -53,10 +53,10 @@ def _canvaz_response(*, url: str = CANVAS_URL, avatar: str = AVATAR_URL) -> byte
 @pytest.fixture(autouse=True)
 def _isolated_cache(tmp_path, monkeypatch):
     """The miss cache is on disk; keep it off the developer's."""
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "cache"))
     import importlib
 
-    from SpotiFLAC.core import response_cache
+    from mornye.core import response_cache
 
     importlib.reload(response_cache)
     monkeypatch.setattr(cv, "get_cached_response", response_cache.get)
@@ -67,7 +67,7 @@ def _isolated_cache(tmp_path, monkeypatch):
 
 
 def test_the_request_asks_for_the_track_by_uri() -> None:
-    from SpotiFLAC.core.spotify_protobuf import read_fields
+    from mornye.core.spotify_protobuf import read_fields
 
     outer = read_fields(cv.encode_canvaz_request(TRACK_ID))
     entity = read_fields(bytes(outer[1][0][1]))

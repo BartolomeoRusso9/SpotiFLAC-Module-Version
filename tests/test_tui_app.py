@@ -14,14 +14,14 @@ from __future__ import annotations
 import pytest
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, THEMES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.tui.app import MODES, THEMES, MornyeTui
+from mornye.tui.config_state import ConfigState
 
 
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -33,7 +33,7 @@ def _record_and_succeed(target: list[str], text: str) -> bool:
 
 @drives_the_ui
 async def test_the_app_starts_and_stops_cleanly() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         assert app_of(pilot).query_one("#sidebar") is not None
         assert app_of(pilot).query_one("#panels") is not None
         # The log pane starts hidden: it is for a run, not for reading at rest.
@@ -48,9 +48,9 @@ async def test_the_stylesheet_is_found_and_applied() -> None:
     install — Textual would carry on with an unstyled screen — so this also
     checks the rules actually came from it.
     """
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         sources = " ".join(str(key) for key in app_of(pilot).stylesheet.source)
-        assert "spotiflac.tcss" in sources
+        assert "mornye.tcss" in sources
 
         sidebar = app_of(pilot).query_one("#sidebar")
         assert sidebar.styles.width is not None
@@ -61,7 +61,7 @@ async def test_the_sidebar_switches_panels() -> None:
     """Indices come from MODES, so adding a mode cannot silently reorder this."""
     keys = [key for key, _label in MODES]
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         switcher = app_of(pilot).query_one("#panels")
         assert switcher.current == "download"
 
@@ -73,7 +73,7 @@ async def test_the_sidebar_switches_panels() -> None:
 
 @drives_the_ui
 async def test_every_sidebar_entry_has_a_panel() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         switcher = app_of(pilot).query_one("#panels")
         for index, (key, _label) in enumerate(MODES):
             app_of(pilot).query_one("#sidebar").index = index
@@ -85,7 +85,7 @@ async def test_every_sidebar_entry_has_a_panel() -> None:
 
 @drives_the_ui
 async def test_editing_a_field_updates_the_state_and_the_command() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Input
 
         app_of(pilot).query_one("#cfg-output_dir", Input).value = "/tmp/elsewhere"
@@ -100,7 +100,7 @@ async def test_a_change_before_the_command_panel_exists_is_not_fatal() -> None:
     """Regression (seen on Windows CI): the form's Changed can reach the app
     before the command panel, composed after it, is mounted — and
     `query_one("#command")` then raised NoMatches, killing the app."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Input
 
         await app_of(pilot).query_one("#command").remove()
@@ -112,7 +112,7 @@ async def test_a_change_before_the_command_panel_exists_is_not_fatal() -> None:
 
 @drives_the_ui
 async def test_a_dependent_setting_is_disabled_rather_than_ignored() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Switch
 
         bitrate = app_of(pilot).query_one("#cfg-transcode_bitrate")
@@ -136,14 +136,14 @@ async def test_an_unrunnable_command_is_generated_with_the_gaps_named() -> None:
     answer, so every unmet requirement shows as a placeholder and is listed
     above the command as well.
     """
-    async with SpotiFLACTui(ConfigState()).run_test() as pilot:
+    async with MornyeTui(ConfigState()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = 2
         await pilot.pause()
 
         rendered = str(app_of(pilot).query_one("#command").content)
         assert "Not runnable yet" in rendered
-        assert "spotiflac" in rendered
-        # The gaps are named, never rendered as `spotiflac '' … -s`.
+        assert "mornye" in rendered
+        # The gaps are named, never rendered as `mornye '' … -s`.
         assert "<URL-or-CSV>" in rendered
         assert "<PROVIDER>" in rendered
         assert "''" not in rendered
@@ -151,15 +151,15 @@ async def test_an_unrunnable_command_is_generated_with_the_gaps_named() -> None:
 
 @drives_the_ui
 async def test_the_command_panel_shows_the_command_once_it_can_run() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         rendered = str(app_of(pilot).query_one("#command").content)
-        assert "spotiflac" in rendered
+        assert "mornye" in rendered
         assert "-s" in rendered
 
 
 @drives_the_ui
 async def test_the_log_pane_toggles() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         pane = app_of(pilot).query_one("#log-pane")
         assert pane.display is False
 
@@ -178,7 +178,7 @@ async def test_single_key_bindings_do_not_steal_typing() -> None:
     key, which would make four letters untypeable in every text field on the
     screen. None of these are, and this is what says so.
     """
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         from textual.widgets import Input
 
         field = app_of(pilot).query_one("#cfg-url", Input)
@@ -196,9 +196,9 @@ async def test_single_key_bindings_do_not_steal_typing() -> None:
 
 @drives_the_ui
 async def test_the_help_screen_opens_and_closes() -> None:
-    from SpotiFLAC.tui.help_screen import HelpScreen
+    from mornye.tui.help_screen import HelpScreen
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         # From the sidebar, so no text field swallows the question mark.
         app_of(pilot).query_one("#sidebar").focus()
         await pilot.pause()
@@ -215,12 +215,12 @@ async def test_the_help_screen_opens_and_closes() -> None:
 @drives_the_ui
 async def test_the_help_screen_lists_the_real_bindings() -> None:
     """Documented keys must be keys the app actually binds."""
-    from SpotiFLAC.tui.help_screen import KEYS
+    from mornye.tui.help_screen import KEYS
 
     from textual.binding import Binding
 
     bound: set[str] = set()
-    for binding in SpotiFLACTui.BINDINGS:
+    for binding in MornyeTui.BINDINGS:
         if not isinstance(binding, Binding):
             continue
         bound.update(part.strip() for part in binding.key.split(","))
@@ -246,7 +246,7 @@ async def test_the_help_screen_lists_the_real_bindings() -> None:
 async def test_ctrl_o_copies_the_whole_log_as_written() -> None:
     """Every kept line, unwrapped, whichever panel has focus and whether or
     not the log pane is open."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(60, 30)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(60, 30)) as pilot:
         copied: list[str] = []
         app_of(pilot).copy_to_clipboard = copied.append
         long_line = "[tidal] saved /music/The Weeknd/After Hours/" + "x" * 80 + ".flac"
@@ -270,7 +270,7 @@ async def test_ctrl_o_copies_the_whole_log_as_written() -> None:
 async def test_ctrl_o_also_puts_the_log_on_the_system_clipboard(monkeypatch) -> None:
     """macOS Terminal ignores OSC 52 — the report was "non copia". The
     system clipboard is filled as well whenever a copy command exists."""
-    from SpotiFLAC.tui import clipboard
+    from mornye.tui import clipboard
 
     native: list[str] = []
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
@@ -279,7 +279,7 @@ async def test_ctrl_o_also_puts_the_log_on_the_system_clipboard(monkeypatch) -> 
         clipboard, "native_copy", lambda text: _record_and_succeed(native, text)
     )
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         osc: list[str] = []
         app_of(pilot).copy_to_clipboard = osc.append
         app_of(pilot)._write_log("one")
@@ -296,7 +296,7 @@ async def test_ctrl_o_also_puts_the_log_on_the_system_clipboard(monkeypatch) -> 
 
 @drives_the_ui
 async def test_ctrl_y_takes_the_same_two_routes(monkeypatch) -> None:
-    from SpotiFLAC.tui import clipboard
+    from mornye.tui import clipboard
 
     native: list[str] = []
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
@@ -305,11 +305,11 @@ async def test_ctrl_y_takes_the_same_two_routes(monkeypatch) -> None:
         clipboard, "native_copy", lambda text: _record_and_succeed(native, text)
     )
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).copy_to_clipboard = lambda text: None
         await pilot.press("ctrl+y")
         await pilot.pause()
-        assert native and native[0].startswith("spotiflac")
+        assert native and native[0].startswith("mornye")
         assert "Command copied" in str(app_of(pilot).query_one("#status").content)
 
 
@@ -317,7 +317,7 @@ def test_over_ssh_only_the_terminal_route_is_used(monkeypatch) -> None:
     """The system clipboard there is the server's, not the user's."""
     from types import SimpleNamespace
 
-    from SpotiFLAC.tui import clipboard
+    from mornye.tui import clipboard
 
     called: list[str] = []
     monkeypatch.setenv("SSH_CONNECTION", "10.0.0.2 51000 10.0.0.1 22")
@@ -333,7 +333,7 @@ def test_over_ssh_only_the_terminal_route_is_used(monkeypatch) -> None:
 
 @pytest.mark.uses_system_clipboard
 def test_the_copy_command_follows_the_platform(monkeypatch) -> None:
-    from SpotiFLAC.tui import clipboard
+    from mornye.tui import clipboard
 
     present = {"pbcopy", "xclip", "wl-copy", "clip"}
     monkeypatch.setattr(
@@ -364,7 +364,7 @@ def test_the_copy_command_follows_the_platform(monkeypatch) -> None:
 
 @drives_the_ui
 async def test_ctrl_o_on_an_empty_log_says_so_and_copies_nothing() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         copied: list[str] = []
         app_of(pilot).copy_to_clipboard = copied.append
         await pilot.press("ctrl+o")
@@ -374,15 +374,15 @@ async def test_ctrl_o_on_an_empty_log_says_so_and_copies_nothing() -> None:
 
 
 def test_the_copied_log_is_capped_like_the_pane() -> None:
-    from SpotiFLAC.tui import app as app_module
+    from mornye.tui import app as app_module
 
-    tui = SpotiFLACTui(_ready_state())
+    tui = MornyeTui(_ready_state())
     assert tui._log_lines.maxlen == app_module._LOG_MAX_LINES
 
 
 @drives_the_ui
 async def test_themes_cycle() -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         assert app_of(pilot).theme == THEMES[0]
         await pilot.press("t")
         assert app_of(pilot).theme == THEMES[1]
@@ -390,7 +390,7 @@ async def test_themes_cycle() -> None:
 
 @drives_the_ui
 async def test_starting_a_run_without_the_essentials_says_what_is_missing() -> None:
-    async with SpotiFLACTui(ConfigState()).run_test() as pilot:
+    async with MornyeTui(ConfigState()).run_test() as pilot:
         app_of(pilot).action_start_download()
         await pilot.pause()
 
@@ -405,7 +405,7 @@ async def test_starting_a_run_without_the_essentials_says_what_is_missing() -> N
 @drives_the_ui
 async def test_quitting_is_refused_while_a_download_runs() -> None:
     """`_download_running`, not `_running` — Textual owns the latter."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot)._download_running = True
         app_of(pilot).action_request_quit()
         await pilot.pause()

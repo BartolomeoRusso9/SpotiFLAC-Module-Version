@@ -11,7 +11,7 @@ import json
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
 TestClient = fastapi_testclient.TestClient
 
@@ -22,7 +22,7 @@ def test_manifest_is_served_and_valid() -> None:
     assert resp.status_code == 200
 
     manifest = resp.json()
-    assert manifest["name"] == "SpotiFLAC"
+    assert manifest["name"] == "Mornye"
     assert manifest["display"] == "standalone"
     assert len(manifest["icons"]) >= 1
     for icon in manifest["icons"]:
@@ -66,11 +66,11 @@ def test_index_html_declares_the_manifest_and_theme_color() -> None:
 def test_index_html_registers_the_service_worker_gated_on_web_mode() -> None:
     with TestClient(webapp.create_app()) as client:
         html = client.get("/").text
-    assert "__SPOTIFLAC_WEB_MODE__" in html  # injected by webapp.py's index()
+    assert "__MORNYE_WEB_MODE__" in html  # injected by webapp.py's index()
     assert "navigator.serviceWorker.register" in html
     # The registration script must run after the web-mode flag is set, so
     # it actually sees `true` in web mode instead of reading `undefined`
     # from a stale evaluation order.
-    flag_pos = html.index("__SPOTIFLAC_WEB_MODE__ = true")
+    flag_pos = html.index("__MORNYE_WEB_MODE__ = true")
     register_pos = html.index("navigator.serviceWorker.register")
     assert flag_pos < register_pos

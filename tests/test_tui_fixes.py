@@ -13,10 +13,10 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.core.paths import default_download_dir
-from SpotiFLAC.tui.app import SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.config_view import quality_choices
+from mornye.core.paths import default_download_dir
+from mornye.tui.app import MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.config_view import quality_choices
 
 
 def _ready_state() -> ConfigState:
@@ -41,7 +41,7 @@ async def test_closing_the_log_never_leaves_the_focus_nowhere() -> None:
     cursor, arrow keys dead, an interface that looks broken and cannot be
     steered back.
     """
-    async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
         pane = app_of(pilot).query_one("#log-pane")
 
@@ -61,7 +61,7 @@ async def test_closing_the_log_never_leaves_the_focus_nowhere() -> None:
 @drives_the_ui
 async def test_the_log_toggles_from_wherever_the_focus_is() -> None:
     """Ctrl+L is priority-bound, so nothing focused can swallow it."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
         pane = app_of(pilot).query_one("#log-pane")
 
@@ -81,7 +81,7 @@ async def test_the_log_toggles_from_wherever_the_focus_is() -> None:
 @drives_the_ui
 async def test_escape_closes_the_log() -> None:
     """A second way out, for terminals that keep Ctrl+L for themselves."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
         pane = app_of(pilot).query_one("#log-pane")
 
@@ -109,10 +109,10 @@ async def test_a_run_opens_the_log_through_the_same_door(monkeypatch) -> None:
 
     async def _no_memory(self) -> None: ...
 
-    monkeypatch.setattr("SpotiFLAC.tui.app.DownloadRunner", _StubRunner)
-    monkeypatch.setattr(SpotiFLACTui, "_remember_folder", _no_memory)
+    monkeypatch.setattr("mornye.tui.app.DownloadRunner", _StubRunner)
+    monkeypatch.setattr(MornyeTui, "_remember_folder", _no_memory)
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(104, 38)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(104, 38)) as pilot:
         await _settled(pilot)
         app_of(pilot).action_start_download()
         await _settled(pilot)
@@ -152,12 +152,12 @@ async def test_the_menu_follows_the_providers(monkeypatch) -> None:
     # what is installed is replaced — tidal does not become a prerequisite
     # of the suite.
     monkeypatch.setattr(
-        "SpotiFLAC.tui.config_view.installed_service_ids",
+        "mornye.tui.config_view.installed_service_ids",
         lambda: ["deezer", "tidal"],
     )
 
     state = ConfigState(url="https://x/y", services=["deezer"])
-    async with SpotiFLACTui(state).run_test(size=(104, 40)) as pilot:
+    async with MornyeTui(state).run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
         panel = app_of(pilot).query_one("#download")
 
@@ -186,7 +186,7 @@ async def test_dropping_tidal_takes_atmos_with_it() -> None:
         services=["tidal"],
         quality="DOLBY_ATMOS",
     )
-    async with SpotiFLACTui(state).run_test(size=(104, 40)) as pilot:
+    async with MornyeTui(state).run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
         assert app_of(pilot).state.to_cfg()["quality"] == "DOLBY_ATMOS"
 
@@ -206,7 +206,7 @@ async def test_dropping_tidal_takes_atmos_with_it() -> None:
 async def test_the_folder_field_opens_on_music_spotiflac() -> None:
     from textual.widgets import Input
 
-    async with SpotiFLACTui().run_test(size=(104, 40)) as pilot:
+    async with MornyeTui().run_test(size=(104, 40)) as pilot:
         await _settled(pilot)
 
         assert app_of(pilot).state.output_dir == default_download_dir()
@@ -219,14 +219,14 @@ async def test_the_folder_field_opens_on_music_spotiflac() -> None:
 @drives_the_ui
 async def test_last_run_folder_no_longer_overrides_the_default(monkeypatch) -> None:
     """A one-off download elsewhere must not become where everything goes."""
-    import SpotiFLAC.core.session_memory as session_memory
+    import mornye.core.session_memory as session_memory
 
     async def _elsewhere() -> str:
         return "/tmp/somewhere-i-downloaded-once"
 
     monkeypatch.setattr(session_memory, "get_last_folder_async", _elsewhere)
 
-    async with SpotiFLACTui().run_test(size=(104, 40)) as pilot:
+    async with MornyeTui().run_test(size=(104, 40)) as pilot:
         for _ in range(15):
             await pilot.pause()
         assert app_of(pilot).state.output_dir == default_download_dir()
@@ -240,7 +240,7 @@ def test_the_gui_and_the_tui_default_to_the_same_folder() -> None:
     download directory — it is testing the default itself, not using it.
     """
     pytest.importorskip("webview")
-    from SpotiFLAC.app import DEFAULT_DOWNLOAD_DIR
-    from SpotiFLAC.tui.app import DEFAULT_OUTPUT_DIR
+    from mornye.app import DEFAULT_DOWNLOAD_DIR
+    from mornye.tui.app import DEFAULT_OUTPUT_DIR
 
     assert DEFAULT_DOWNLOAD_DIR == DEFAULT_OUTPUT_DIR == default_download_dir()

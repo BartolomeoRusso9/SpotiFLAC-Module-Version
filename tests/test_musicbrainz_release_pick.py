@@ -17,7 +17,7 @@ multi-disc releases numbered against disc 1 whatever disc the track is on.
 
 from __future__ import annotations
 
-from SpotiFLAC.core import musicbrainz as mb
+from mornye.core import musicbrainz as mb
 
 
 def _release(

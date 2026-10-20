@@ -8,14 +8,14 @@
 
 ## Quick Start
 
-SpotiFLAC can be used in multiple ways. Choose the mode that fits your needs.
+Mornye can be used in multiple ways. Choose the mode that fits your needs.
 
 ### GUI Mode (recommended for most users)
 
 Launch the graphical user interface with the `--gui` flag:
 
 ```bash
-spotiflac --gui
+mornye --gui
 ```
 
 *(Or `python launcher.py --gui` if running from source)*
@@ -25,7 +25,7 @@ spotiflac --gui
 Runs the exact same interface as `--gui`, served as a local web server instead of a native window — open it at `http://127.0.0.1:8000` (or whatever host/port you choose) in any browser:
 
 ```bash
-spotiflac --web
+mornye --web
 ```
 
 *(Or `python launcher.py --web` if running from source)*
@@ -39,8 +39,8 @@ Binds to `127.0.0.1` (this machine only) by default. Override with `--host`/`--p
 Off by default (today's behavior, unchanged). Set a shared secret and every request — page, static asset, or API call — needs it, either as `?token=...` on the first visit or a cookie from then on:
 
 ```bash
-spotiflac --web --host 0.0.0.0 --web-token "some-long-random-string"
-# or: export SPOTIFLAC_WEB_TOKEN="some-long-random-string"
+mornye --web --host 0.0.0.0 --web-token "some-long-random-string"
+# or: export MORNYE_WEB_TOKEN="some-long-random-string"
 ```
 
 Then open `http://your-host:8000/?token=some-long-random-string` once; the browser remembers it after that. This travels as a plain query param/cookie with no HTTPS here, so treat it as basic access control on a network you already trust, not a substitute for real TLS.
@@ -51,12 +51,12 @@ An alternative to (or combined with) `--web-token`: per-account login instead of
 
 ```bash
 # One-time: create an account
-spotiflac --web-user-add alice "a real password"
-spotiflac --web-user-list
-spotiflac --web-user-remove alice
+mornye --web-user-add alice "a real password"
+mornye --web-user-list
+mornye --web-user-remove alice
 
 # Then run the server with accounts required
-spotiflac --web --web-multiuser
+mornye --web --web-multiuser
 ```
 
 The web GUI shows a sign-in screen automatically when it detects `--web-multiuser` is on (via `GET /api/auth/status`); a "Sign Out" option then appears under Settings → General. You can also call the endpoints directly — `POST /api/auth/login {"username", "password"}` to get a session cookie, `POST /api/auth/logout` to clear it — from a script or a frontend of your own. `POST /api/queue/submit-download {"selected_indices", "config"}` and `GET /api/queue/mine` submit and list a user's own queued downloads.
@@ -73,14 +73,14 @@ The web GUI shows a sign-in screen automatically when it detects `--web-multiuse
 download queue live in front of you while it runs.
 
 ```bash
-spotiflac --tui
+mornye --tui
 ```
 
 *(Or `python launcher.py --tui` if running from source)*
 
 A sidebar picks the panel — **Download** for the settings, **Queue** for the
 run, **Session** for recent URLs and saved profiles, **Command** for the
-equivalent `spotiflac …` invocation, rebuilt as you type. `Ctrl+R` starts the
+equivalent `mornye …` invocation, rebuilt as you type. `Ctrl+R` starts the
 download, `Ctrl+L` shows the log, `q` quits.
 
 The [Terminal UI page](tui.md) covers it in full.
@@ -101,7 +101,7 @@ The [Terminal UI page](tui.md) covers it in full.
 
 **Smart File Paths:** If you input a Single Track URL, it will ask if you want to set a specific `.flac` output path. If you do, it intelligently skips all questions about filename formatting and subfolder organization.
 
-**Unified Quality Profiles:** Choose `HI_RES_LOSSLESS` for the best available lossless tier or `LOSSLESS` for standard lossless audio. SpotiFLAC translates either profile into each provider's native quality token; lossy-only services use their best available audio. If Tidal is your only configured service, the wizard also offers `DOLBY_ATMOS` — it's Tidal-exclusive, so it isn't offered when other providers are involved (they'd just fall back to `HI_RES_LOSSLESS`).
+**Unified Quality Profiles:** Choose `HI_RES_LOSSLESS` for the best available lossless tier or `LOSSLESS` for standard lossless audio. Mornye translates either profile into each provider's native quality token; lossy-only services use their best available audio. If Tidal is your only configured service, the wizard also offers `DOLBY_ATMOS` — it's Tidal-exclusive, so it isn't offered when other providers are involved (they'd just fall back to `HI_RES_LOSSLESS`).
 
 **CLI Generator:** At the end of the configuration, it generates and prints the exact CLI command for your specific setup, so you can copy and reuse it in your automated scripts.
 
@@ -109,12 +109,12 @@ The [Terminal UI page](tui.md) covers it in full.
 
 ### Python API (Synchronous)
 
-The classic synchronous API remains the simplest way to integrate SpotiFLAC into your own applications. `services` accepts either a legacy alias (resolved to `ext:<id>` if you have a matching extension installed) or an explicit `ext:<id>`.
+The classic synchronous API remains the simplest way to integrate Mornye into your own applications. `services` accepts either a legacy alias (resolved to `ext:<id>` if you have a matching extension installed) or an explicit `ext:<id>`.
 
 ```python
-from SpotiFLAC import SpotiFLAC
+from mornye import Mornye
 
-SpotiFLAC(
+Mornye(
     url="https://open.spotify.com/track/TRACK_ID",
     output_dir="./downloads",
     services=["ext:tidal-web"],  # requires the corresponding extension to already be installed
@@ -127,12 +127,12 @@ This API is fully backwards-compatible with previous releases and is recommended
 
 | API | Best for |
 | --- | --- |
-| `SpotiFLAC` | Scripts, CLI wrappers, automation |
-| `AsyncSpotiFLAC` | Discord bots, Telegram bots, FastAPI, asyncio applications |
+| `Mornye` | Scripts, CLI wrappers, automation |
+| `AsyncMornye` | Discord bots, Telegram bots, FastAPI, asyncio applications |
 
 ### Asynchronous API
 
-SpotiFLAC now features a 100% native asynchronous engine, making it ideal for modern Python applications built on asyncio, including:
+Mornye now features a 100% native asynchronous engine, making it ideal for modern Python applications built on asyncio, including:
 
 - Discord bots
 - Telegram bots
@@ -141,14 +141,14 @@ SpotiFLAC now features a 100% native asynchronous engine, making it ideal for mo
 - Background workers
 - Any asynchronous Python project
 
-The new `AsyncSpotiFLAC` client uses a shared asynchronous HTTP session, allowing multiple downloads and metadata requests to run efficiently without blocking the event loop.
+The new `AsyncMornye` client uses a shared asynchronous HTTP session, allowing multiple downloads and metadata requests to run efficiently without blocking the event loop.
 
 ```python
 import asyncio
-from SpotiFLAC import AsyncSpotiFLAC
+from mornye import AsyncMornye
 
 async def main():
-    async with AsyncSpotiFLAC(
+    async with AsyncMornye(
         output_dir="./downloads",
         services=["ext:tidal-web", "ext:qobuz-web"],
         quality="LOSSLESS",
@@ -177,14 +177,14 @@ asyncio.run(main())
 - Much better performance when downloading multiple tracks concurrently
 - Perfect for long-running applications and web backends
 
-> **Note:** The classic synchronous `SpotiFLAC()` API remains fully supported and backwards-compatible.
+> **Note:** The classic synchronous `Mornye()` API remains fully supported and backwards-compatible.
 
 ---
 
 
 ## Supported URL Types
 
-SpotiFLAC's core resolves the following URL formats as input; whether a given target is actually reachable depends entirely on which extensions you have installed:
+Mornye's core resolves the following URL formats as input; whether a given target is actually reachable depends entirely on which extensions you have installed:
 
 | Type | Spotify |
 | --- | --- |
@@ -193,7 +193,7 @@ SpotiFLAC's core resolves the following URL formats as input; whether a given ta
 | Playlist | `open.spotify.com/playlist/...` |
 | Discography (via artist URL) | `open.spotify.com/artist/...` |
 
-A **CSV file** is accepted wherever a URL is — `spotiflac --csv wishlist.csv DEST`, the file icon in the GUI, a path in the terminal UI's Source panel. Rows that carry no link are matched against the catalogue, and the ones that cannot be matched are reported rather than guessed at. See [Downloading from a CSV](csv.md).
+A **CSV file** is accepted wherever a URL is — `mornye --csv wishlist.csv DEST`, the file icon in the GUI, a path in the terminal UI's Source panel. Rows that carry no link are matched against the catalogue, and the ones that cannot be matched are reported rather than guessed at. See [Downloading from a CSV](csv.md).
 
 > Extensions may add support for resolving Tidal, Apple Music, SoundCloud, YouTube, Pandora, or other platform URLs directly, and may output FLAC, ALAC/M4A, AAC, or MP3 depending on what the source and the extension support. Consult the documentation of the specific extension you install for its supported URL formats and output format.
 

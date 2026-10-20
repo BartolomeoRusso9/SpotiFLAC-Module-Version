@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import web_users
+from mornye.core import web_users
 
 
 @pytest.fixture(autouse=True)

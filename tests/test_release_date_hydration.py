@@ -13,9 +13,9 @@ import asyncio
 
 import pytest
 
-import SpotiFLAC.downloader as downloader_mod
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+import mornye.downloader as downloader_mod
+from mornye.core.models import TrackMetadata
+from mornye.downloader import DownloadOptions, MornyeDownloader
 
 ALBUM_DATES = {"A1": "2020-01-02", "A2": "2019", "A3": ""}
 
@@ -69,7 +69,7 @@ class _FakeMetadataClient:
 @pytest.fixture()
 def hydrate(tmp_path, monkeypatch):
     def _run(tracks, fail: bool = False):
-        downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+        downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
         web = _FakeWebClient(fail=fail)
         monkeypatch.setattr(downloader_mod, "IsrcHelper", _FakeIsrcHelper)
         monkeypatch.setattr(downloader_mod, "AsyncHttpClient", lambda *a, **k: None)

@@ -3,7 +3,7 @@
 Every GUI download reported "0% · 0.00 MB/s" from start to finish, and the
 queue dock never moved. The numbers were real; they were being read off an
 empty queue, because DownloadWorker.run_async() called
-DownloadManager.reset() *after* SpotiflacDownloader._register_queue_async()
+DownloadManager.reset() *after* MornyeDownloader._register_queue_async()
 had filled it. start_download(), complete_download() and fail_download()
 then looked up ids no longer in the queue and silently did nothing.
 """
@@ -15,9 +15,9 @@ import inspect
 
 import pytest
 
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.core.progress import DownloadManager
-from SpotiFLAC.downloader import DownloadOptions, DownloadWorker, SpotiflacDownloader
+from mornye.core.models import TrackMetadata
+from mornye.core.progress import DownloadManager
+from mornye.downloader import DownloadOptions, DownloadWorker, MornyeDownloader
 
 
 def _track(track_id: str, title: str) -> TrackMetadata:
@@ -31,7 +31,7 @@ def downloader(tmp_path):
     # The manager is a process-wide singleton, so one test's queue would
     # otherwise be the next one's starting state.
     asyncio.run(DownloadManager().reset())
-    return SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    return MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
 
 
 def test_registering_a_batch_leaves_it_in_the_queue(downloader):
@@ -87,4 +87,4 @@ def test_the_worker_does_not_clear_the_queue_it_was_handed():
     """
     source = inspect.getsource(DownloadWorker.run_async)
     assert "manager.reset()" not in source
-    assert "reset()" in inspect.getsource(SpotiflacDownloader._register_queue_async)
+    assert "reset()" in inspect.getsource(MornyeDownloader._register_queue_async)

@@ -12,8 +12,8 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import lyrics
-from SpotiFLAC.core.lyrics import _itunes_result_matches
+from mornye.core import lyrics
+from mornye.core.lyrics import _itunes_result_matches
 
 
 def _res(title: str, artist: str, seconds: float, track_id: int = 1) -> dict:

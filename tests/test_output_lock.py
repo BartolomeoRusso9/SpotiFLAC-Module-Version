@@ -18,7 +18,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.output_lock import output_path_lock
+from mornye.core.output_lock import output_path_lock
 
 
 async def _write_interleaved(path: str, marker: str, log: list[str]) -> None:
@@ -154,7 +154,7 @@ def test_the_provider_holds_it_across_the_whole_write() -> None:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[1] / "SpotiFLAC" / "extensions" / "provider.py"
+        Path(__file__).resolve().parents[1] / "Mornye" / "extensions" / "provider.py"
     ).read_text()
 
     guarded = [

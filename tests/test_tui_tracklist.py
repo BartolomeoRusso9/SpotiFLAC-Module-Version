@@ -14,14 +14,14 @@ from typing import Any
 
 import pytest
 
-import SpotiFLAC.downloader as downloader
-import SpotiFLAC.core.tracklist as tracklist_module
-import SpotiFLAC.launcher as launcher_module
+import mornye.downloader as downloader
+import mornye.core.tracklist as tracklist_module
+import mornye.launcher as launcher_module
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.tracklist_view import TracklistPanel
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.tracklist_view import TracklistPanel
 
 _TRACKS_INDEX = [key for key, _ in MODES].index("tracks")
 _ALBUM = "https://open.spotify.com/album/a1"
@@ -89,7 +89,7 @@ def capture_runs(monkeypatch) -> Any:
 
 
 def _ready_state() -> ConfigState:
-    return ConfigState(url=_ALBUM, output_dir="/tmp/spotiflac-test", services=["tidal"])
+    return ConfigState(url=_ALBUM, output_dir="/tmp/mornye-test", services=["tidal"])
 
 
 async def _settled(pilot) -> None:
@@ -138,7 +138,7 @@ async def _loaded(pilot) -> TracklistPanel:
 @drives_the_ui
 async def test_nothing_is_fetched_until_you_ask(stub_album) -> None:
     """Opening the panel must not fire a request at a URL you are editing."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         app_of(pilot).query_one("#sidebar").index = _TRACKS_INDEX
         await _settled(pilot)
 
@@ -152,7 +152,7 @@ async def test_nothing_is_fetched_until_you_ask(stub_album) -> None:
 @drives_the_ui
 async def test_loading_lists_the_tracks_all_selected(stub_album) -> None:
     """The panel exists to take tracks away, so it opens with all of them."""
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
 
         from textual.widgets import DataTable
@@ -168,7 +168,7 @@ async def test_loading_lists_the_tracks_all_selected(stub_album) -> None:
 
 @drives_the_ui
 async def test_a_track_with_no_link_of_its_own_is_marked(stub_album) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         await _loaded(pilot)
 
         from textual.widgets import DataTable
@@ -180,7 +180,7 @@ async def test_a_track_with_no_link_of_its_own_is_marked(stub_album) -> None:
 
 @drives_the_ui
 async def test_space_toggles_the_row_under_the_cursor(stub_album) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
 
         from textual.widgets import DataTable
@@ -202,7 +202,7 @@ async def test_space_toggles_the_row_under_the_cursor(stub_album) -> None:
 
 @drives_the_ui
 async def test_all_none_and_invert(stub_album) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
 
         panel.action_select_none()
@@ -230,7 +230,7 @@ async def test_a_bad_link_is_reported_not_raised(monkeypatch) -> None:
 
     monkeypatch.setattr(downloader, "_call_metadata_get_url", _boom)
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
 
         assert len(panel.tracklist) == 0
@@ -242,7 +242,7 @@ async def test_a_bad_link_is_reported_not_raised(monkeypatch) -> None:
 @drives_the_ui
 async def test_loading_without_a_url_says_where_to_set_one() -> None:
     state = ConfigState(output_dir="/tmp/o", services=["tidal"])
-    async with SpotiFLACTui(state).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(state).run_test(size=(110, 40)) as pilot:
         await _loaded(pilot)
         assert "Set a URL on the Download panel" in str(
             app_of(pilot).query_one("#tracks-status").render(),
@@ -261,7 +261,7 @@ async def test_the_whole_album_is_fetched_as_the_album(
     """All selected keeps the collection URL, ordering and numbering intact."""
     seen = capture_runs
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         await _loaded(pilot)
         app_of(pilot).action_start_download()
         for _ in range(60):
@@ -279,7 +279,7 @@ async def test_a_pick_reaches_the_downloader_as_track_links(
     """The failure this guards: a pick that looks right and downloads the lot."""
     seen = capture_runs
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
         panel.action_select_none()
         from textual.widgets import DataTable
@@ -310,7 +310,7 @@ async def test_starting_with_nothing_picked_is_refused(
     """An empty pick used to mean 'no opinion', which downloaded everything."""
     seen = capture_runs
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
         panel.action_select_none()
         await pilot.pause()
@@ -328,7 +328,7 @@ async def test_an_unloaded_panel_leaves_the_url_alone(stub_album, capture_runs) 
     """No pick is not the same as an empty pick."""
     seen = capture_runs
 
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         app_of(pilot).action_start_download()
         for _ in range(60):
             await pilot.pause()
@@ -340,7 +340,7 @@ async def test_an_unloaded_panel_leaves_the_url_alone(stub_album, capture_runs) 
 
 @drives_the_ui
 async def test_the_command_panel_admits_the_cli_cannot_do_this(stub_album) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test(size=(110, 40)) as pilot:
+    async with MornyeTui(_ready_state()).run_test(size=(110, 40)) as pilot:
         panel = await _loaded(pilot)
         panel.action_select_none()
         from textual.widgets import DataTable

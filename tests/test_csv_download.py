@@ -1,4 +1,4 @@
-"""`--csv FILE DEST` — the CSV run itself (see SpotiflacDownloader.run_csv_async).
+"""`--csv FILE DEST` — the CSV run itself (see MornyeDownloader.run_csv_async).
 
 A CSV is treated as one playlist that happens to live on disk, so the run
 inherits the merged-playlist behaviour: a track listed twice is fetched once,
@@ -16,9 +16,9 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import csv_source
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from mornye.core import csv_source
+from mornye.core.models import TrackMetadata
+from mornye.downloader import DownloadOptions, MornyeDownloader
 
 
 def _track(track_id: str, title: str, artist: str = "Foo Fighters") -> TrackMetadata:
@@ -42,7 +42,7 @@ def downloader(tmp_path, monkeypatch) -> Any:
         enrich_metadata=False,
         embed_lyrics=False,
     )
-    instance = SpotiflacDownloader(opts)
+    instance = MornyeDownloader(opts)
 
     catalogue = {
         "https://open.spotify.com/track/aaa": _track("aaa", "Everlong"),
@@ -183,7 +183,7 @@ def test_a_file_whose_rows_all_fail_stops_before_planning(tmp_path, downloader) 
 
 @pytest.fixture
 def _restore_cli_logger():
-    """Undoes what a CLI run does to the "SpotiFLAC" logger.
+    """Undoes what a CLI run does to the "Mornye" logger.
 
     `_run_download_async` installs a console handler and sets
     `propagate = False` on it — correct for a real run, and a side effect on
@@ -192,7 +192,7 @@ def _restore_cli_logger():
     """
     import logging
 
-    logger = logging.getLogger("SpotiFLAC")
+    logger = logging.getLogger("mornye")
     handlers = list(logger.handlers)
     propagate, level = logger.propagate, logger.level
     yield
@@ -204,8 +204,8 @@ def _restore_cli_logger():
 def test_the_cli_hands_the_csv_to_the_csv_run(
     tmp_path, monkeypatch, _restore_cli_logger
 ) -> None:
-    """`spotiflac --csv FILE DEST` must reach run_csv_async, not run_async."""
-    from SpotiFLAC import launcher
+    """`mornye --csv FILE DEST` must reach run_csv_async, not run_async."""
+    from mornye import launcher
 
     calls: dict = {}
 
@@ -221,7 +221,7 @@ def test_the_cli_hands_the_csv_to_the_csv_run(
         async def run_async(self, *a, **k):  # pragma: no cover - must not run
             raise AssertionError("a CSV run must not go through run_async")
 
-    monkeypatch.setattr(launcher, "SpotiflacDownloader", _FakeDownloader)
+    monkeypatch.setattr(launcher, "MornyeDownloader", _FakeDownloader)
     path = _csv(tmp_path, "https://open.spotify.com/track/aaa\n")
 
     asyncio.run(
@@ -263,8 +263,8 @@ def test_the_cli_hands_the_csv_to_the_csv_run(
 
 
 def test_the_unmatched_rows_are_written_where_asked(tmp_path, monkeypatch) -> None:
-    from SpotiFLAC import launcher
-    from SpotiFLAC.core import spotify_metadata
+    from mornye import launcher
+    from mornye.core import spotify_metadata
 
     class _EmptyCatalogue:
         async def search_tracks_async(self, query: str, limit: int = 8) -> list:
@@ -305,7 +305,7 @@ def test_the_unmatched_rows_are_written_where_asked(tmp_path, monkeypatch) -> No
 
 
 def test_an_unreadable_csv_stops_the_run(tmp_path) -> None:
-    from SpotiFLAC import launcher
+    from mornye import launcher
 
     with pytest.raises(SystemExit) as exit_info:
         asyncio.run(

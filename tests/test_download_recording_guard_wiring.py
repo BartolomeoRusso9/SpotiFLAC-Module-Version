@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC import downloader as dl
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye import downloader as dl
+from mornye.core.models import DownloadResult, TrackMetadata
 
 REQUESTED_ISRC = "USQX92405794"
 KARAOKE_ISRC = "QZYD92602058"
@@ -83,9 +83,7 @@ def _no_network(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(
-        "SpotiFLAC.core.recording_guard._lookup_isrc_async", fake_lookup
-    )
+    monkeypatch.setattr("mornye.core.recording_guard._lookup_isrc_async", fake_lookup)
     monkeypatch.setattr(dl, "_schedule_hires_check", lambda *a, **k: None)
 
 

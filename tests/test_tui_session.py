@@ -16,9 +16,9 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.session_view import SessionPanel
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.session_view import SessionPanel
 
 _SESSION_INDEX = [key for key, _ in MODES].index("session")
 
@@ -36,8 +36,8 @@ _SAVED_PROFILE = {
 @pytest.fixture
 def stub_session(monkeypatch) -> Any:
     """Stands in for the history and profile stores."""
-    import SpotiFLAC.core.history as history_module
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.history as history_module
+    import mornye.core.profiles as profiles_module
 
     saved: dict[str, dict] = {"weekend": dict(_SAVED_PROFILE)}
 
@@ -72,7 +72,7 @@ def stub_session(monkeypatch) -> Any:
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -85,7 +85,7 @@ async def _settled(pilot) -> None:
 
 @drives_the_ui
 async def test_history_and_profiles_are_listed(stub_session) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -101,7 +101,7 @@ async def test_history_and_profiles_are_listed(stub_session) -> None:
 
 @drives_the_ui
 async def test_picking_a_url_fills_the_form(stub_session) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         panel = app_of(pilot).query_one("#session", SessionPanel)
         panel.post_message(
             SessionPanel.UrlChosen("https://open.spotify.com/track/two"),
@@ -121,7 +121,7 @@ async def test_picking_a_url_fills_the_form(stub_session) -> None:
 
 @drives_the_ui
 async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -157,7 +157,7 @@ async def test_loading_a_profile_replaces_every_setting(stub_session) -> None:
 async def test_saving_a_profile_stores_the_current_configuration(
     stub_session,
 ) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -168,13 +168,13 @@ async def test_saving_a_profile_stores_the_current_configuration(
         await _settled(pilot)
 
         assert "nightly" in stub_session
-        assert stub_session["nightly"]["output_dir"] == "/tmp/spotiflac-test"
+        assert stub_session["nightly"]["output_dir"] == "/tmp/mornye-test"
         assert stub_session["nightly"]["services"] == ["tidal"]
 
 
 @drives_the_ui
 async def test_deleting_a_profile_removes_it(stub_session) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -191,8 +191,8 @@ async def test_deleting_a_profile_removes_it(stub_session) -> None:
 @drives_the_ui
 async def test_an_unreadable_store_is_reported_not_raised(monkeypatch) -> None:
     """A broken history file must not stop the UI from opening."""
-    import SpotiFLAC.core.history as history_module
-    import SpotiFLAC.core.profiles as profiles_module
+    import mornye.core.history as history_module
+    import mornye.core.profiles as profiles_module
 
     def _explode():
         msg = "history is corrupt"
@@ -205,7 +205,7 @@ async def test_an_unreadable_store_is_reported_not_raised(monkeypatch) -> None:
     monkeypatch.setattr(history_module, "get_recent_fetches", _explode)
     monkeypatch.setattr(profiles_module, "list_profiles_async", _explode_async)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -225,7 +225,7 @@ async def test_an_unreadable_store_is_reported_not_raised(monkeypatch) -> None:
 @drives_the_ui
 async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
     """The Option id is the URL, so a repeat raised DuplicateID mid-list."""
-    import SpotiFLAC.core.history as history_module
+    import mornye.core.history as history_module
 
     repeated = "https://open.spotify.com/album/same"
     monkeypatch.setattr(
@@ -238,7 +238,7 @@ async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
         ],
     )
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 
@@ -252,7 +252,7 @@ async def test_the_same_link_fetched_twice_is_listed_once(monkeypatch) -> None:
 
 @drives_the_ui
 async def test_saving_without_a_name_says_so(stub_session) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SESSION_INDEX
         await _settled(pilot)
 

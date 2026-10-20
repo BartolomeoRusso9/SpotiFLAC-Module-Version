@@ -5,18 +5,18 @@
 
 # Writing a Python Extension
 
-SpotiFLAC ships **no built-in download providers**. Every source — Qobuz, Tidal,
+Mornye ships **no built-in download providers**. Every source — Qobuz, Tidal,
 Amazon, Deezer, SoundCloud, … — is a *Python extension*: a ZIP file
-(`.sflx` / `.spotiflac-ext`) containing a manifest and one Python module that
+(`.sflx` / `.mornye-ext`) containing a manifest and one Python module that
 subclasses `BaseProvider`. The module is imported **in-process** and its
-`download_track_async()` is called for every track SpotiFLAC wants from that
+`download_track_async()` is called for every track Mornye wants from that
 service.
 
 This guide walks the whole path: scaffold → implement against the `core`
 toolbox → test → package → publish in a registry.
 
 > **Reference extensions.** The existing providers in
-> `SpotiFLAC-Python-Extensions/extensions/*.sflx` are the canonical examples.
+> `Mornye-Python-Extensions/extensions/*.sflx` are the canonical examples.
 > `soundcloud_native.sflx` is the most readable end-to-end (search → resolve →
 > stream → tag). Unzip one and read along.
 
@@ -25,7 +25,7 @@ toolbox → test → package → publish in a registry.
 ## 1. How an extension is wired in
 
 ```
-services=["ext:mysource-py"]         SpotiFLAC(...) / --service
+services=["ext:mysource-py"]         Mornye(...) / --service
         │
         ▼
 _build_providers_for_name()          downloader.py
@@ -44,9 +44,9 @@ downloader applies tags / validation / dedup / stats
 Key consequences:
 
 - Your module **must expose exactly one** `BaseProvider` subclass. Two (or
-  zero) is a hard load error. Import helper classes from `SpotiFLAC.core.*`,
+  zero) is a hard load error. Import helper classes from `mornye.core.*`,
   don't define extra `BaseProvider` subclasses in the same file.
-- `metadata` already carries everything SpotiFLAC knows from Spotify (ISRC,
+- `metadata` already carries everything Mornye knows from Spotify (ISRC,
   title, artists, duration, ISRC, cover URL…). Your job is to **match** that
   track on your service and **download** it.
 - Return a `DownloadResult` — never raise for "not found on my service";
@@ -56,13 +56,13 @@ Key consequences:
 
 ## 2. Prerequisites
 
-- SpotiFLAC installed in the environment you'll test with (`pip install -e .`
-  from a checkout is fine — you need `SpotiFLAC.core` importable).
+- Mornye installed in the environment you'll test with (`pip install -e .`
+  from a checkout is fine — you need `mornye.core` importable).
 - Python 3.11+ (matches the project).
 - Your extension may depend on third-party packages, but there is **no
   dependency install step** for `.sflx` packages — the module is imported as-is.
   Anything you `import` must already be present in the host environment. Stick
-  to what SpotiFLAC already depends on (`httpx`, `pydantic`, `mutagen`,
+  to what Mornye already depends on (`httpx`, `pydantic`, `mutagen`,
   `aiofiles`, `cryptography`, `beautifulsoup4`) unless you also document the
   extra install for your users.
 
@@ -71,7 +71,7 @@ Key consequences:
 ## 3. Scaffold
 
 ```bash
-spotiflac --ext-scaffold mysource --runtime python
+mornye --ext-scaffold mysource --runtime python
 # writes ./mysource/{manifest.json, mysource.py, README.md}
 ```
 
@@ -118,16 +118,16 @@ for anything new.
 
 ## 5. The `BaseProvider` contract
 
-Full source: `SpotiFLAC/core/base.py`. You implement **one** method.
+Full source: `mornye/core/base.py`. You implement **one** method.
 
 ```python
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from SpotiFLAC.core.base import BaseProvider
-from SpotiFLAC.core.errors import TrackNotFoundError
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye.core.base import BaseProvider
+from mornye.core.errors import TrackNotFoundError
+from mornye.core.models import DownloadResult, TrackMetadata
 
 
 class MysourceProvider(BaseProvider):
@@ -192,14 +192,14 @@ class MysourceProvider(BaseProvider):
 ```
 
 For env vars that the JS sandbox would strip, users add them to
-`SPOTIFLAC_EXT_ENV_PASSTHROUGH` — but Python extensions share the host
+`MORNYE_EXT_ENV_PASSTHROUGH` — but Python extensions share the host
 environment directly, so any `os.environ` var works as-is.
 
 ---
 
 ## 6. `TrackMetadata` — what you receive
 
-Source: `SpotiFLAC/core/models.py`. Pydantic model; the fields you'll actually
+Source: `mornye/core/models.py`. Pydantic model; the fields you'll actually
 use to match a track:
 
 | Field | Notes |
@@ -222,7 +222,7 @@ Helpers: `metadata.first_artist`, `metadata.duration_seconds`,
 
 ## 7. The `core` toolbox
 
-Everything under `SpotiFLAC.core.*` is importable from your extension. The ones
+Everything under `mornye.core.*` is importable from your extension. The ones
 that matter for a download provider:
 
 ### `core.http` — `AsyncHttpClient`
@@ -258,7 +258,7 @@ to `super().__init__(rate_limiter=...)`.
 | `RateLimitedError(self.name, retry_after=30)` | You detected a soft-limit the HTTP layer didn't. |
 | `ParseError`, `NetworkError`, `InvalidUrlError` | As named. |
 
-All derive from `SpotiflacError` (`.kind: ErrorKind`, `.is_retryable()`).
+All derive from `MornyeError` (`.kind: ErrorKind`, `.is_retryable()`).
 
 ### `core.models` — `DownloadResult`
 
@@ -278,7 +278,7 @@ return DownloadResult.fail(self.name, "human-readable reason")   # tried, failed
 After the file is written, tag it:
 
 ```python
-from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
+from mornye.core.tagger import EmbedOptions, embed_metadata_async
 
 opts = EmbedOptions(
     first_artist_only=first_artist_only,
@@ -302,7 +302,7 @@ enrichment. Always wrap it so a tagging failure doesn't lose the download.
 ### `core.download_validation` / `core.flac_validation`
 
 ```python
-from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from mornye.core.download_validation import validate_downloaded_track_async
 
 ok, why = await validate_downloaded_track_async(str(dest), metadata.duration_ms // 1000)
 if not ok:
@@ -328,7 +328,7 @@ if not ok:
 ## 8. A complete minimal provider
 
 ```python
-"""mysource — SpotiFLAC Python extension."""
+"""mysource — Mornye Python extension."""
 from __future__ import annotations
 
 import asyncio
@@ -336,11 +336,11 @@ import logging
 import os
 from collections.abc import Callable
 
-from SpotiFLAC.core.base import BaseProvider
-from SpotiFLAC.core.errors import TrackNotFoundError
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
-from SpotiFLAC.core.tagger import EmbedOptions, embed_metadata_async
-from SpotiFLAC.core.download_validation import validate_downloaded_track_async
+from mornye.core.base import BaseProvider
+from mornye.core.errors import TrackNotFoundError
+from mornye.core.models import DownloadResult, TrackMetadata
+from mornye.core.tagger import EmbedOptions, embed_metadata_async
+from mornye.core.download_validation import validate_downloaded_track_async
 
 logger = logging.getLogger(__name__)
 
@@ -477,7 +477,7 @@ if "mysource.example" in (metadata.external_url or ""):
 **Dry-run** (no install, no network, no registry):
 
 ```bash
-spotiflac --ext-dry-run ./mysource
+mornye --ext-dry-run ./mysource
 # checks: manifest parses, required fields, entry point imports,
 #         exactly one BaseProvider subclass
 ```
@@ -485,12 +485,12 @@ spotiflac --ext-dry-run ./mysource
 **Install into your real extensions dir and run a download:**
 
 ```python
-from SpotiFLAC.extensions import ExtensionManager
+from mornye.extensions import ExtensionManager
 ExtensionManager(auto_install_downloads=False).install_from_file("./mysource.sflx")
 ```
 
 ```bash
-spotiflac "https://open.spotify.com/track/..." ./out --service ext:mysource-py
+mornye "https://open.spotify.com/track/..." ./out --service ext:mysource-py
 ```
 
 The `-py` suffix forces the Python provider only (no JS fallback pairing).
@@ -498,7 +498,7 @@ Plain `--service mysource` also works once installed (legacy-alias resolution).
 
 **Iterating:** re-`install_from_file` after each change, or point
 `ExtensionManager(ext_dir=...)` at a scratch dir and pass
-`SpotiFLAC(..., ext_dir=...)`.
+`Mornye(..., ext_dir=...)`.
 
 ---
 
@@ -519,7 +519,7 @@ computes SHA-256, and rewrites `registry.json`. Use it if you maintain a
 registry.
 
 Multi-file extensions are fine (put helpers next to the entry point); intra-
-package imports resolve under `SpotiFLAC.extensions_plugins.<name>` once
+package imports resolve under `mornye.extensions_plugins.<name>` once
 `preload_python_modules()` runs, so `from .helper import X` works.
 
 ---
@@ -550,34 +550,34 @@ A registry is a JSON file you host anywhere. Entry shape:
 ```
 
 - `sha256` is verified on install; a mismatch aborts (registry installs) unless
-  `SPOTIFLAC_ALLOW_CHECKSUM_MISMATCH=1` (local file installs only). Omitting it
+  `MORNYE_ALLOW_CHECKSUM_MISMATCH=1` (local file installs only). Omitting it
   installs "unverified".
 - `category` in `{"download", "download_provider", "utility",
   "runtime_utility"}` (or a matching `tags` entry) makes it auto-install on
   startup when the registry is configured.
 - Users add your registry with
-  `spotiflac --registries https://example.com/registry.json` (persisted) or
-  `SPOTIFLAC_REGISTRIES=...`.
+  `mornye --registries https://example.com/registry.json` (persisted) or
+  `MORNYE_REGISTRIES=...`.
 
 **Optional Ed25519 signature** (lets users pin trust to your key):
 
 ```bash
-python -m SpotiFLAC.tools.registry_signing_cli keygen
-python -m SpotiFLAC.tools.registry_signing_cli sign \
+python -m mornye.tools.registry_signing_cli keygen
+python -m mornye.tools.registry_signing_cli sign \
   --private-key <base64> --id mysource-py --version 0.1.0 \
   --sha256 <hex> --download-url https://example.com/mysource.sflx
 # paste the printed "signature": "..." into the entry
 ```
 
 Canonical signed message is `id|version|sha256|download_url`. Users then run
-`spotiflac --trust-key-add "you" "<public key>"` and optionally
+`mornye --trust-key-add "you" "<public key>"` and optionally
 `--min-trust-tier signed`.
 
 ---
 
 ## 13. Gotchas
 
-- **No sandbox.** Python extensions are imported into the SpotiFLAC process —
+- **No sandbox.** Python extensions are imported into the Mornye process —
   full access to its memory, env, filesystem. Only ship code you'd run
   yourself. (JS extensions get a limited env; Python gets none.)
 - **Exactly one `BaseProvider` subclass** per module — enforced at load time

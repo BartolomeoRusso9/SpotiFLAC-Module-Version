@@ -11,7 +11,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/spotiflac
+  IMAGE_NAME: ${{ github.repository_owner }}/mornye-python
 
 jobs:
   build:

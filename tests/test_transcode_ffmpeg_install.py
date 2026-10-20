@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.core import ffmpeg_check, transcode
-from SpotiFLAC.core.errors import SpotiflacError
+from mornye.core import ffmpeg_check, transcode
+from mornye.core.errors import MornyeError
 
 
 def test_ensure_ffmpeg_available_attempts_auto_install_when_missing(
@@ -27,7 +27,7 @@ def test_ensure_ffmpeg_available_attempts_auto_install_when_missing(
         ffmpeg_check, "ensure_ffmpeg_installed", fake_ensure_ffmpeg_installed
     )
 
-    with pytest.raises(SpotiflacError) as exc_info:
+    with pytest.raises(MornyeError) as exc_info:
         transcode.ensure_ffmpeg_available("mp3")
 
     assert calls == [{}]

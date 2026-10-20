@@ -27,7 +27,7 @@ If applicable, add screenshots to help explain your problem.
  - OS: [e.g. Windows, macOS, Linux]
  - Browser / runtime: [e.g. Chrome, Safari, PowerShell]
  - Python version: [e.g. 3.12]
- - SpotiFLAC version: [e.g. v1.0.0]
+ - Mornye version: [e.g. v1.0.0]
 
 **Additional context**
 Add any other context about the problem here.

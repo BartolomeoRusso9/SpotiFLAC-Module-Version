@@ -13,9 +13,9 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import csv_source
-from SpotiFLAC.core.errors import SpotiflacError
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.core import csv_source
+from mornye.core.errors import MornyeError
+from mornye.core.models import TrackMetadata
 
 EXPORTIFY = (
     '"Track URI","Track Name","Artist Name(s)","Album Name","ISRC","Duration (ms)"\n'
@@ -144,19 +144,19 @@ def test_headerless_rows_are_read_by_what_their_values_look_like(tmp_path) -> No
 
 
 def test_a_file_with_nothing_usable_in_it_is_an_error(tmp_path) -> None:
-    with pytest.raises(SpotiflacError):
+    with pytest.raises(MornyeError):
         csv_source.read_rows(_write(tmp_path, "empty.csv", "\n\n"))
 
     # A recognised header and no rows under it: the file is understood and
     # holds nothing, which is a mistake worth stopping for rather than a run
     # that downloads zero tracks and reports success.
     header_only = '"Track URI","Track Name","Artist Name(s)"\n'
-    with pytest.raises(SpotiflacError):
+    with pytest.raises(MornyeError):
         csv_source.read_rows(_write(tmp_path, "header-only.csv", header_only))
 
 
 def test_a_missing_file_is_an_error_not_a_traceback(tmp_path) -> None:
-    with pytest.raises(SpotiflacError):
+    with pytest.raises(MornyeError):
         csv_source.read_rows(str(tmp_path / "nope.csv"))
 
 

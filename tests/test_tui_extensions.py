@@ -14,8 +14,8 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
 
 _EXT_INDEX = [key for key, _ in MODES].index("extensions")
 
@@ -40,7 +40,7 @@ def stub_registries(monkeypatch):
         "trust": [],
     }
 
-    import SpotiFLAC.extensions.registry_config as registry_config
+    import mornye.extensions.registry_config as registry_config
 
     monkeypatch.setattr(
         registry_config, "list_registries", lambda: list(state["links"])
@@ -58,7 +58,7 @@ def stub_registries(monkeypatch):
 
     monkeypatch.setattr(registry_config, "remove_registry", _remove)
 
-    import SpotiFLAC.extensions.manager as manager_module
+    import mornye.extensions.manager as manager_module
 
     class _Manager:
         def __init__(self, *args, **kwargs) -> None:
@@ -70,7 +70,7 @@ def stub_registries(monkeypatch):
 
 
 def _ready_state() -> ConfigState:
-    return ConfigState(output_dir="/tmp/spotiflac-test", services=["tidal"])
+    return ConfigState(output_dir="/tmp/mornye-test", services=["tidal"])
 
 
 async def _settled(pilot) -> None:
@@ -80,7 +80,7 @@ async def _settled(pilot) -> None:
 
 @drives_the_ui
 async def test_links_are_listed_with_where_they_came_from(stub_registries) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -98,7 +98,7 @@ async def test_links_are_listed_with_where_they_came_from(stub_registries) -> No
 
 @drives_the_ui
 async def test_adding_a_link_installs_from_it_immediately(stub_registries) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -125,7 +125,7 @@ async def test_the_trust_floor_from_the_command_line_is_honoured(
     stub_registries,
 ) -> None:
     """`--min-trust-tier` has to reach an install started from this panel."""
-    async with SpotiFLACTui(_ready_state(), "signed").run_test() as pilot:
+    async with MornyeTui(_ready_state(), "signed").run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -142,7 +142,7 @@ async def test_the_trust_floor_from_the_command_line_is_honoured(
 
 @drives_the_ui
 async def test_removing_the_selected_link(stub_registries) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -161,7 +161,7 @@ async def test_removing_the_selected_link(stub_registries) -> None:
 
 @drives_the_ui
 async def test_adding_nothing_says_so(stub_registries) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -178,7 +178,7 @@ async def test_adding_nothing_says_so(stub_registries) -> None:
 
 @drives_the_ui
 async def test_a_failing_add_is_reported_not_raised(monkeypatch) -> None:
-    import SpotiFLAC.extensions.registry_config as registry_config
+    import mornye.extensions.registry_config as registry_config
 
     monkeypatch.setattr(registry_config, "list_registries", list)
 
@@ -188,7 +188,7 @@ async def test_a_failing_add_is_reported_not_raised(monkeypatch) -> None:
 
     monkeypatch.setattr(registry_config, "add_registry", _explode)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 
@@ -205,11 +205,11 @@ async def test_a_failing_add_is_reported_not_raised(monkeypatch) -> None:
 
 @drives_the_ui
 async def test_an_empty_list_says_so(monkeypatch) -> None:
-    import SpotiFLAC.extensions.registry_config as registry_config
+    import mornye.extensions.registry_config as registry_config
 
     monkeypatch.setattr(registry_config, "list_registries", list)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _EXT_INDEX
         await _settled(pilot)
 

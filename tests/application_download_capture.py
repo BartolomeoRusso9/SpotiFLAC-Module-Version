@@ -26,4 +26,4 @@ def capture_service(monkeypatch, seen):
         def __init__(self, **kwargs):
             super().__init__(seen=seen, **kwargs)
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", Service)
+    monkeypatch.setattr("mornye.application.DownloadService", Service)

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from SpotiFLAC.core import solver
+from mornye.core import solver
 
 
 def test_build_chromium_options_keeps_the_created_temp_profile(monkeypatch):
@@ -49,7 +49,7 @@ def test_cleanup_refuses_to_remove_unmanaged_chrome_directory(monkeypatch, tmp_p
     profile_dir = tmp_path / "com.google.Chrome.example"
     profile_dir.mkdir()
     marker = profile_dir / "keep.txt"
-    marker.write_text("not owned by SpotiFLAC", encoding="utf-8")
+    marker.write_text("not owned by Mornye", encoding="utf-8")
     monkeypatch.delenv("TS_PROFILE_DIR", raising=False)
 
     solver._cleanup_profile_dir(str(profile_dir))

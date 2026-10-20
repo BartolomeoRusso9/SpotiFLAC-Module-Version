@@ -10,8 +10,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from SpotiFLAC.extensions import trust
-from SpotiFLAC.extensions.manager import RegistryEntry
+from mornye.extensions import trust
+from mornye.extensions.manager import RegistryEntry
 
 
 def _generate_keypair() -> tuple[str, Ed25519PrivateKey]:

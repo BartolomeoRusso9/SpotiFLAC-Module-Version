@@ -1,57 +1,24 @@
-# SpotiFLAC Python Module
+# Mornye Python
 
-Fetch Spotify track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music and other provider backends — supplied entirely via extensions you choose and configure yourself. Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
+Fetch Spotify track metadata and retrieve matching lossless audio through provider backends supplied entirely by extensions you choose and configure. Integrate Mornye into Python projects, automation tools, or bulk downloaders.
 
-[![GitHub stars](https://img.shields.io/github/stars/BartolomeoRusso9/SpotiFLAC-Module-Version?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/stargazers)
-[![Latest release](https://img.shields.io/github/v/release/BartolomeoRusso9/SpotiFLAC-Module-Version?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases/latest)
-[![PyPI version](https://img.shields.io/pypi/v/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
-[![Python versions](https://img.shields.io/pypi/pyversions/spotiflac?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/SpotiFLAC/)
-[![GitHub downloads](https://img.shields.io/github/downloads/BartolomeoRusso9/SpotiFLAC-Module-Version/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/releases)
-[![PyPI downloads](https://img.shields.io/pepy/dt/spotiflac?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/SpotiFLAC/)
-[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/SpotiFLAC_Chat)
+[Canonical repository](https://github.com/BartolomeoRusso9/Mornye-Python) (private; access required)
 
 ## Disclaimer
 
-This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/LICENSE).
+Mornye Python is the renamed continuation of the SpotiFLAC Python module maintained by the same author. The import package, distribution, command, and project identity have changed; see the [migration guide](docs/guide/migration.md). The project is licensed under the [MIT License](LICENSE).
 
-**SpotiFLAC-Module-Version** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with, and has no control over or responsibility for, any other project sharing a similar name on other platforms.
+Mornye Python is an independent project. It is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with any separate project or app that uses the name “Mornye.”
 
-No copyrighted content is hosted, stored, mirrored, or distributed by this repository. The core application does not bundle, ship, or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for the content or behavior of third-party extensions or registries a user may choose to install.
+The core application does not bundle or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for third-party extensions or registries.
 
-You are solely responsible for:
-
-1. Ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws.
-2. Reading and adhering to the Terms of Service of any platform or provider you access, directly or through an extension.
-3. Any legal consequences resulting from the use or misuse of this tool.
-
-This software is provided free of charge by the maintainer. If you paid a third party for access to it, you may have been misled or scammed.
-
-The software is provided "as is", without warranty of any kind, express or implied. The author assumes no liability for any bans, damages, or legal issues arising from its use or misuse. Users assume all risk associated with its use.
-
-If you are a copyright holder or an authorized representative and believe this repository infringes upon your rights, please contact the maintainer with sufficient detail (including relevant URLs and proof of ownership); the matter will be promptly investigated.
+Use the software only in ways that comply with applicable laws and the terms of services you access. The software is provided "as is," without warranty; users are responsible for its use and for any extensions or registries they install.
 
 ---
 
-> **Looking for a standalone app?**
->
-> - [SpotiFLAC (Desktop)](https://github.com/afkarxyz/SpotiFLAC) — Download music in true lossless FLAC from different providers for Windows, macOS & Linux
-> - [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile) — SpotiFLAC for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
+## Why Mornye Python
 
----
-
-## Why the module (instead of the standalone apps)
-
-The Desktop and Mobile apps are built for direct, immediate use: open it, paste a link, download. The Python module exists for a different case — **integrating** this logic into something else.
-
-It makes sense to start here if:
-
-- **You're building a bot** (Telegram, Discord) or a service that needs to handle requests from many users automatically, not a single manual download.
-- **You need the async API** (`AsyncSpotiFLAC`) inside an existing FastAPI/Quart/Sanic app, with shared connection pooling.
-- **You want to orchestrate bulk downloads** via scripts — multiple playlists, full discographies, local library retagging — with custom logic (filenames via a Python function, post-download actions, saved profiles).
-- **You need to run headless**, on a server, a NAS, or inside Docker, possibly as part of a larger pipeline.
-- **You want full control over which extensions get loaded** and from which registry, instead of relying on a fixed set baked into an app.
-
-If you just want a GUI for personal use, with no code involved, the [Desktop](https://github.com/afkarxyz/SpotiFLAC) or [Mobile](https://github.com/zarzet/SpotiFLAC-Mobile) apps remain the simpler choice — this module is the building block those (and similar projects) can be built on top of.
+Use Mornye when integrating synchronous or asynchronous metadata and download workflows into Python services, automations, bulk jobs, or headless deployments. You choose which extensions to install and which registries to trust.
 
 ---
 
@@ -81,6 +48,7 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 - **CSV input** — hand it a playlist export (Exportify, Soundiiz, a bare list of links) and it downloads what the file lists, matching rows that carry no link and reporting the ones it cannot
 - **Dashboard** — what you have actually downloaded, as numbers: top artists, genres, decades, providers, listening time, activity by weekday and streaks (`--stats`, or the Stats screen)
 - **Durable queue and download log** (SQLite): a restart no longer loses queued work
+- **SMB destinations** — use an OS-mounted share or the optional SMB2/SMB3 backend, with staged and verified remote delivery
 - **Per-account quotas and an admin role** in `--web-multiuser`
 - **Extension health panel** — success rate, latency and last error per provider
 - **Wrong-recording guard** — a provider that answers with a karaoke take, a clean edit of an explicit track, or another artist's cover is rejected and the download falls through to the next one, instead of producing a file that carries the right tags and the wrong audio
@@ -90,10 +58,12 @@ If you just want a GUI for personal use, with no code involved, the [Desktop](ht
 ## Installation
 
 ```bash
-pip install SpotiFLAC
+git clone https://github.com/BartolomeoRusso9/Mornye-Python.git
+cd Mornye-Python
+python -m pip install .
 ```
 
-> **Important:** out of the box, SpotiFLAC does nothing but resolve Spotify metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](docs/guide/extensions.md#extensions) below.
+The repository is private, so you need access to clone it. Do not install the old `SpotiFLAC` distribution alongside Mornye; follow the [migration guide](docs/guide/migration.md) first. Mornye has no built-in provider or default extension source. Before downloading, configure a registry you trust and install an extension; see [Extensions](docs/guide/extensions.md#extensions).
 
 ---
 
@@ -111,7 +81,9 @@ renders it usefully. Every page below is the same text that used to be here.
 | [Downloading from a CSV](docs/guide/csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |
 | [Your library in numbers](docs/guide/dashboard.md) | The dashboard built from what you have actually downloaded — top artists, genres, decades, activity |
 | [Configuration](docs/guide/configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
-| [API Reference](docs/guide/api-reference.md) | `SpotiFLAC` and `AsyncSpotiFLAC`, and the objects they return |
+| [Network Destinations](docs/guide/network-destinations.md) | Mounted paths, native SMB profiles, safe transfers, CLI and Docker |
+| [API Reference](docs/guide/api-reference.md) | `Mornye` and `AsyncMornye`, and the objects they return |
+| [Migration Guide](docs/guide/migration.md) | Moving from the old distribution, CLI, environment, and local state |
 | [Local Tagging](docs/guide/local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
 | [Automation & Operations](docs/guide/automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
 | [Following Artists](docs/guide/subscriptions.md) | Subscriptions, new-release checks, scheduled playlist monitoring, and the library-upgrade pass |
@@ -137,4 +109,4 @@ If this software is useful and brings you value, consider supporting the project
 
 > Provider-specific credits (Tidal, Qobuz, Amazon Music, Deezer, SoundCloud, Apple Music, Pandora, and any third-party API used to reach them) now belong to whichever extension you install — see that extension's own documentation for its credits and terms.
 >
-> **[!TIP]** Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
+> The repository is private; release notifications are available to users with repository access.

@@ -5,15 +5,15 @@ from __future__ import annotations
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
 TestClient = fastapi_testclient.TestClient
 
 
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path))
-    from SpotiFLAC.core import web_users
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path))
+    from mornye.core import web_users
 
     monkeypatch.setattr(web_users, "USERS_FILE", tmp_path / "web_users.json")
 
@@ -61,7 +61,7 @@ def test_metrics_reports_provider_success_and_failure_counts(tmp_path) -> None:
     """provider_stats has recorded these all along, to order providers by
     reliability. Nothing ever showed them to anyone.
     """
-    from SpotiFLAC.core import provider_stats
+    from mornye.core import provider_stats
 
     provider_stats._save_cache_sync(
         {
@@ -98,7 +98,7 @@ def test_metrics_requires_the_token_when_one_is_set() -> None:
 
 
 def test_metrics_requires_a_session_in_multiuser_mode() -> None:
-    from SpotiFLAC.core import web_users
+    from mornye.core import web_users
 
     web_users.create_user("alice", "alice-password")
     client = TestClient(webapp.create_app(multiuser=True))
@@ -116,7 +116,7 @@ def test_metrics_omits_instance_wide_counters_in_multiuser_mode() -> None:
     to show whole-instance activity to, so nobody is shown it. What is left
     is the configuration the frontend needs to render itself.
     """
-    from SpotiFLAC.core import web_users
+    from mornye.core import web_users
 
     web_users.create_user("alice", "alice-password")
     client = TestClient(webapp.create_app(multiuser=True))

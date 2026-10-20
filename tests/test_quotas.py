@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import download_log, web_users
-from SpotiFLAC.core.web_users import (
+from mornye.core import download_log, web_users
+from mornye.core.web_users import (
     QuotaExceededError,
     WebUserError,
     change_password,
@@ -33,7 +33,7 @@ def _download(owner: str, size: int = 1024, *, age_s: float = 0.0) -> None:
     if age_s:
         # Backdate the row so the rolling window can be exercised without
         # a test that has to wait a day.
-        from SpotiFLAC.core import db
+        from mornye.core import db
 
         with db.transaction() as conn:
             conn.execute(

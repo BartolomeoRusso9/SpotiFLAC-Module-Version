@@ -13,8 +13,8 @@ import asyncio
 
 import pytest
 
-import SpotiFLAC.core.tracklist as tracklist_module
-from SpotiFLAC.core.tracklist import (
+import mornye.core.tracklist as tracklist_module
+from mornye.core.tracklist import (
     Tracklist,
     download_target,
     is_link,
@@ -82,7 +82,7 @@ def test_the_client_matches_the_domain(url, expected, monkeypatch) -> None:
     here to read a class name. Neutering initialize() keeps the assertion
     exactly as it was and takes the network out of it.
     """
-    from SpotiFLAC.core import spotfetch
+    from mornye.core import spotfetch
 
     monkeypatch.setattr(
         spotfetch.SpotifyWebClient, "initialize", lambda self, force=False: None
@@ -226,7 +226,7 @@ def test_an_empty_url_resolves_to_nothing_without_a_request() -> None:
 
 def test_resolving_unpacks_whatever_shape_the_provider_returns(monkeypatch) -> None:
     """Providers return 2-, 3-, or 4-tuples; all three have to work."""
-    import SpotiFLAC.downloader as downloader
+    import mornye.downloader as downloader
 
     shapes = {
         "two": ("Album", [_Track("a")]),
@@ -254,7 +254,7 @@ def test_resolving_unpacks_whatever_shape_the_provider_returns(monkeypatch) -> N
 
 def test_a_provider_failure_reaches_the_caller(monkeypatch) -> None:
     """Swallowing it here makes every failure look like an empty album."""
-    import SpotiFLAC.downloader as downloader
+    import mornye.downloader as downloader
 
     async def _boom(client, url, **kwargs):
         msg = "provider said no"

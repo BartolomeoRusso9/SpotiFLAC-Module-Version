@@ -1,6 +1,6 @@
 """Per-account isolation in `--web-multiuser`.
 
-Before this, every account shared one SpotiFLAC_API instance: separate
+Before this, every account shared one MornyeAPI instance: separate
 logins, but one `current_tracks`, one `download_dir` and one event stream.
 Two people searching at the same time overwrote each other's results, and
 everybody's browser saw everybody's progress and file paths.
@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
-webapp = pytest.importorskip("SpotiFLAC.webapp")
+webapp = pytest.importorskip("mornye.webapp")
 
 TestClient = fastapi_testclient.TestClient
 
 
 @pytest.fixture(autouse=True)
 def _accounts(tmp_path, monkeypatch):
-    from SpotiFLAC.core import web_users
+    from mornye.core import web_users
 
     monkeypatch.setattr(web_users, "USERS_FILE", tmp_path / "web_users.json")
     web_users.create_user("alice", "alice-password")
@@ -140,7 +140,7 @@ def test_queued_bare_url_uses_application_download_service(monkeypatch) -> None:
             seen["output_dir"] = str(request.config.output.directory)
             return object()
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeService)
+    monkeypatch.setattr("mornye.application.DownloadService", FakeService)
     app = webapp.create_app(multiuser=True)
 
     result = app.state.job_queue._handler(
@@ -167,7 +167,7 @@ def test_web_app_builds_one_shared_application_download_service(monkeypatch) -> 
         async def download(self, request):
             return object()
 
-    monkeypatch.setattr("SpotiFLAC.application.DownloadService", FakeService)
+    monkeypatch.setattr("mornye.application.DownloadService", FakeService)
 
     app = webapp.create_app(multiuser=True)
 

@@ -17,24 +17,24 @@ from typing import Any, cast
 
 import pytest
 
-from SpotiFLAC import downloader as dl
-from SpotiFLAC.core import provider_cooldown as pc
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
-from SpotiFLAC.extensions.runtime import JSRuntime
+from mornye import downloader as dl
+from mornye.core import provider_cooldown as pc
+from mornye.core.models import DownloadResult, TrackMetadata
+from mornye.extensions.runtime import JSRuntime
 
 OVERLOADED = (
     'HTTP 503 - {"detail":"The server is overloaded and taking a short break. '
     'Please try again in about 51 minute(s)."}'
 )
-TIDAL_PY = "SpotiFLAC.extensions_plugins.tidal_py"
+TIDAL_PY = "mornye.extensions_plugins.tidal_py"
 #: A JS extension has no module of its own: the bridge relays its log lines
 #: under a child of the runtime logger named for the extension.
-TIDAL_WEB = "SpotiFLAC.extensions.runtime.tidal-web"
+TIDAL_WEB = "mornye.extensions.runtime.tidal-web"
 
 
 @pytest.fixture(autouse=True)
 def _cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPOTIFLAC_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MORNYE_CACHE_DIR", str(tmp_path / "cache"))
     yield
     logging.getLogger().removeHandler(pc._watcher)
 
@@ -67,13 +67,13 @@ def test_an_absurd_pause_is_capped_at_a_day() -> None:
 
 def test_the_key_is_the_python_extension() -> None:
     assert pc.extension_key(TIDAL_PY) == "tidal-py"
-    assert pc.extension_key("SpotiFLAC.extensions.provider") == ""
+    assert pc.extension_key("mornye.extensions.provider") == ""
 
 
 def test_the_key_is_the_js_extension_too() -> None:
     assert pc.extension_key(TIDAL_WEB) == "tidal-web"
     # The runtime's own lines name no extension and pause nothing.
-    assert pc.extension_key("SpotiFLAC.extensions.runtime") == ""
+    assert pc.extension_key("mornye.extensions.runtime") == ""
 
 
 def test_a_js_runtime_logs_under_the_extension_s_name() -> None:
@@ -105,7 +105,7 @@ def test_community_cooldown_is_visible_through_the_registry_url(monkeypatch) -> 
     """Verify an active Community cooldown hides its registered URL."""
     pc.pause_community("tidal", 600)
 
-    import SpotiFLAC.core as core
+    import mornye.core as core
 
     monkeypatch.setattr(
         core,
@@ -132,7 +132,7 @@ def test_a_js_extension_s_log_line_starts_the_pause() -> None:
 
 def test_the_same_message_from_the_host_pauses_nothing() -> None:
     pc.watch_extension_logs()
-    logging.getLogger("SpotiFLAC.downloader").warning("%s", OVERLOADED)
+    logging.getLogger("mornye.downloader").warning("%s", OVERLOADED)
 
     assert pc.remaining("tidal-py") == 0
 
@@ -274,7 +274,7 @@ def test_after_the_503_the_next_track_goes_straight_to_tidal_web(
     async def no_lookup(isrc):
         return None
 
-    monkeypatch.setattr("SpotiFLAC.core.recording_guard._lookup_isrc_async", no_lookup)
+    monkeypatch.setattr("mornye.core.recording_guard._lookup_isrc_async", no_lookup)
     monkeypatch.setattr(dl, "_schedule_hires_check", lambda *a, **k: None)
     tidal_py, tidal_web = _OverloadedTidalPy(), _WorkingTidalWeb(tmp_path)
     opts = dl.DownloadOptions(output_dir=str(tmp_path), embed_lyrics=False)

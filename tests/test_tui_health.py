@@ -14,9 +14,9 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.core.health_check import HealthResult
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
+from mornye.core.health_check import HealthResult
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
 
 _HEALTH_INDEX = [key for key, _ in MODES].index("health")
 
@@ -36,7 +36,7 @@ def stub_health(monkeypatch) -> Any:
         calls.append(1)
         return list(_RESULTS)
 
-    import SpotiFLAC.core.health_check as health_module
+    import mornye.core.health_check as health_module
 
     monkeypatch.setattr(health_module, "run_health_check", _run)
     return calls
@@ -45,7 +45,7 @@ def stub_health(monkeypatch) -> Any:
 def _ready_state() -> ConfigState:
     return ConfigState(
         url="https://open.spotify.com/track/x",
-        output_dir="/tmp/spotiflac-test",
+        output_dir="/tmp/mornye-test",
         services=["tidal"],
     )
 
@@ -58,7 +58,7 @@ async def _settled(pilot) -> None:
 @drives_the_ui
 async def test_opening_the_panel_does_not_probe(stub_health) -> None:
     """A panel that starts network traffic on sight is a panel you avoid."""
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
@@ -70,7 +70,7 @@ async def test_opening_the_panel_does_not_probe(stub_health) -> None:
 
 @drives_the_ui
 async def test_checking_lists_a_row_per_provider(stub_health) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
@@ -93,11 +93,11 @@ async def test_a_failing_check_is_reported_not_raised(monkeypatch) -> None:
         msg = "no network"
         raise RuntimeError(msg)
 
-    import SpotiFLAC.core.health_check as health_module
+    import mornye.core.health_check as health_module
 
     monkeypatch.setattr(health_module, "run_health_check", _explode)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 
@@ -114,11 +114,11 @@ async def test_all_reachable_says_so_plainly(monkeypatch) -> None:
     async def _all_up(services=None, *, include_all_endpoints=True):
         return [r for r in _RESULTS if r.ok]
 
-    import SpotiFLAC.core.health_check as health_module
+    import mornye.core.health_check as health_module
 
     monkeypatch.setattr(health_module, "run_health_check", _all_up)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _HEALTH_INDEX
         await _settled(pilot)
 

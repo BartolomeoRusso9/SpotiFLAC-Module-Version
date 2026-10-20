@@ -16,7 +16,7 @@ import logging
 
 import pytest
 
-from SpotiFLAC.core import musicbrainz as mb
+from mornye.core import musicbrainz as mb
 
 
 @pytest.fixture(autouse=True)
@@ -213,7 +213,7 @@ def test_an_unlinked_isrc_falls_back_and_says_so(monkeypatch, caplog) -> None:
     monkeypatch.setattr(mb, "_query_recordings", _fake_query)
     monkeypatch.setattr(mb, "_query_recording_details", lambda _id: {})
 
-    with caplog.at_level(logging.INFO, logger="SpotiFLAC.core.musicbrainz"):
+    with caplog.at_level(logging.INFO, logger="mornye.core.musicbrainz"):
         res = mb.fetch_mb_metadata(
             "ITDF61777027",
             title="Butterfly Knife",
@@ -232,7 +232,7 @@ def test_no_match_anywhere_is_logged_rather_than_swallowed(monkeypatch, caplog) 
     monkeypatch.setattr(mb, "_query_recordings", lambda _q: {"recordings": []})
     monkeypatch.setattr(mb, "_query_recording_details", lambda _id: {})
 
-    with caplog.at_level(logging.INFO, logger="SpotiFLAC.core.musicbrainz"):
+    with caplog.at_level(logging.INFO, logger="mornye.core.musicbrainz"):
         res = mb.fetch_mb_metadata(
             "ITC890400137", title="Ciao fraté", artist="Cor Veleno", duration_ms=193200
         )
@@ -247,7 +247,7 @@ def test_a_failed_lookup_is_logged_as_a_warning(monkeypatch, caplog) -> None:
 
     monkeypatch.setattr(mb, "_query_recordings", _boom)
 
-    with caplog.at_level(logging.INFO, logger="SpotiFLAC.core.musicbrainz"):
+    with caplog.at_level(logging.INFO, logger="mornye.core.musicbrainz"):
         assert mb.fetch_mb_metadata("ITUM72000287") == {}
 
     assert "lookup failed for ISRC ITUM72000287" in caplog.text
@@ -262,7 +262,7 @@ def test_the_pause_after_a_failure_says_how_long_it_has_left(caplog) -> None:
     try:
         assert mb.should_skip_mb()
         assert 0 < mb.mb_skip_remaining() <= mb._MB_STATUS_SKIP_WINDOW
-        with caplog.at_level(logging.INFO, logger="SpotiFLAC.core.musicbrainz"):
+        with caplog.at_level(logging.INFO, logger="mornye.core.musicbrainz"):
             assert mb.fetch_mb_metadata("ITDF61777027") == {}
         assert "lookups paused" in caplog.text
     finally:

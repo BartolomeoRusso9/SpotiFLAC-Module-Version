@@ -12,7 +12,7 @@ service produced, a list of songs a friend sent you. Those are lists of
 `--csv` takes one of those files and downloads what it names.
 
 ```bash
-spotiflac --csv wishlist.csv ~/Music
+mornye --csv wishlist.csv ~/Music
 ```
 
 The whole file is treated as one playlist: a track listed twice is downloaded
@@ -93,7 +93,7 @@ up on — useful for exports whose titles are localised or truncated.
 ### See what it would do first
 
 ```bash
-spotiflac --csv wishlist.csv --csv-dry-run
+mornye --csv wishlist.csv --csv-dry-run
 ```
 
 ```text
@@ -113,7 +113,7 @@ thing as a document.
 ### Fix the ones that missed
 
 ```bash
-spotiflac --csv wishlist.csv ~/Music --csv-unresolved missed.csv
+mornye --csv wishlist.csv ~/Music --csv-unresolved missed.csv
 ```
 
 `missed.csv` is itself a valid `--csv` input: correct a title, paste a link,
@@ -168,7 +168,7 @@ the link. See the [Terminal UI](tui.md#a-csv-instead-of-a-url) page.
 ## Python
 
 ```python
-from SpotiFLAC.core import csv_source
+from mornye.core import csv_source
 
 document = csv_source.read_rows("wishlist.csv")          # no network
 resolution = await csv_source.resolve_rows(document.rows, document=document)
@@ -181,8 +181,8 @@ for missed in resolution.unresolved:
 Or the whole thing at once, through the downloader:
 
 ```python
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+from mornye.downloader import DownloadOptions, MornyeDownloader
 
-downloader = SpotiflacDownloader(DownloadOptions(output_dir="~/Music"))
+downloader = MornyeDownloader(DownloadOptions(output_dir="~/Music"))
 summary = await downloader.run_csv_async("wishlist.csv")
 ```

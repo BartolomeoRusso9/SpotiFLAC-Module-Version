@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.extensions.provider import JSExtensionProvider
+from mornye.core.models import TrackMetadata
+from mornye.extensions.provider import JSExtensionProvider
 
 SPOTIFY_URL = "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b"
 
@@ -80,7 +80,7 @@ def test_provider_gets_native_id_from_spotify_link(
         return target_url
 
     monkeypatch.setattr(
-        "SpotiFLAC.extensions.provider.LinkResolver.resolve_provider_url_async",
+        "mornye.extensions.provider.LinkResolver.resolve_provider_url_async",
         resolve,
     )
 
@@ -101,7 +101,7 @@ def test_foreign_provider_metadata_is_not_fabricated_as_spotify(monkeypatch) -> 
         raise AssertionError("resolver must not be called")
 
     monkeypatch.setattr(
-        "SpotiFLAC.extensions.provider.LinkResolver.resolve_provider_url_async",
+        "mornye.extensions.provider.LinkResolver.resolve_provider_url_async",
         fail,
     )
     metadata = _metadata("https://music.apple.com/us/song/example/123")

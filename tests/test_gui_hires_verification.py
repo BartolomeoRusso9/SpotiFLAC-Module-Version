@@ -1,7 +1,7 @@
 """Hi-Res verification reaching the download from the GUI settings panel.
 
 The desktop window and --web mode share one settings dict and one entry
-point (SpotiFLAC_API._run_download_batch), so the two toggles are tested
+point (MornyeAPI._run_download_batch), so the two toggles are tested
 where every frontend meets the client: the kwargs the wrapper is called
 with. The markup checks below are what stops a renamed input id from
 silently turning the toggles into settings that save and do nothing.
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC import __file__ as spotiflac_file
+from mornye.app import MornyeAPI
+from mornye import __file__ as spotiflac_file
 from tests.application_download_capture import capture_service
 
 FRONTEND = Path(spotiflac_file).parent / "frontend"
@@ -36,7 +36,7 @@ def download_kwargs(tmp_path, monkeypatch) -> Any:
     capture_service(monkeypatch, seen)
 
     def _run(config: dict | None = None) -> dict:
-        api = SpotiFLAC_API()
+        api = MornyeAPI()
         api.download_dir = str(tmp_path)
         api.current_tracks = [_FakeTrack()]
         api.current_url = ""

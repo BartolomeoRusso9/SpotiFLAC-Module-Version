@@ -11,11 +11,11 @@ Read as a whole rather than one row at a time, the same log answers a different
 kind of question — the one people actually ask about their own library.
 
 ```bash
-spotiflac --stats
+mornye --stats
 ```
 
 ```text
-SpotiFLAC — all time
+Mornye — all time
 
   1 284 track(s) · 317 artist(s) · 96 album(s) · 41.2 GB
   3d 14h of music
@@ -107,12 +107,12 @@ itself; without it the CLI reports the whole instance.
 - **Python** —
 
   ```python
-  from SpotiFLAC.core import stats
+  from mornye.core import stats
 
   document = stats.wrapped(window=stats.year_window(2026), top=20)
   print(document["totals"], document["top_artists"])
   print(stats.format_wrapped(document))   # the text rendering above
   ```
 
-The store itself is the SQLite database at `~/.spotiflac/spotiflac.db`
-(`SPOTIFLAC_DB_PATH` moves it), so anything not covered here is a query away.
+The store itself is the SQLite database at `~/.mornye/mornye.db`
+(`MORNYE_DB_PATH` moves it), so anything not covered here is a query away.

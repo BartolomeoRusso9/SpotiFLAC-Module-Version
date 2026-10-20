@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import notifiers
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
-from SpotiFLAC.core.notifiers import NotifierError, build_target
-from SpotiFLAC.core.report import RunReport
+from mornye.core import notifiers
+from mornye.core.models import DownloadResult, TrackMetadata
+from mornye.core.notifiers import NotifierError, build_target
+from mornye.core.report import RunReport
 
 WEBHOOK = "https://example.invalid/hook"
 
@@ -67,7 +67,7 @@ def test_telegram_needs_a_token_and_chat_id(monkeypatch):
 
 def test_private_hosts_are_allowed():
     """Self-hosted ntfy on a LAN is the main use case, not something to block."""
-    target = build_target("ntfy", "http://192.168.1.10:8080/spotiflac")
+    target = build_target("ntfy", "http://192.168.1.10:8080/mornye")
     assert target.kind == "ntfy"
 
 
@@ -177,7 +177,7 @@ def test_send_async_never_raises_when_the_endpoint_is_down(monkeypatch):
         async def post(self, *_a, **_k):
             raise RuntimeError("connection refused")
 
-    monkeypatch.setattr("SpotiFLAC.core.http.AsyncHttpClient", Boom)
+    monkeypatch.setattr("mornye.core.http.AsyncHttpClient", Boom)
     target = build_target("webhook", WEBHOOK)
     assert asyncio.run(notifiers.send_async(target, "hi", {})) is False
 

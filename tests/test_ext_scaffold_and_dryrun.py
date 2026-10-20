@@ -13,8 +13,8 @@ import zipfile
 
 import pytest
 
-from SpotiFLAC.tools.ext_dryrun import dry_run
-from SpotiFLAC.tools.ext_scaffold import scaffold_extension
+from mornye.tools.ext_dryrun import dry_run
+from mornye.tools.ext_scaffold import scaffold_extension
 
 
 def test_scaffold_python_extension_creates_expected_files(tmp_path):
@@ -140,13 +140,13 @@ def test_dry_run_missing_path_reports_cleanly(tmp_path):
 
 
 def test_dry_run_on_a_packaged_zip(tmp_path):
-    """Package a scaffolded extension into a .spotiflac-ext ZIP (the real
+    """Package a scaffolded extension into a .mornye-ext ZIP (the real
     distribution format) and dry-run *that*, exercising the
     ExtensionManager.install_from_file() path rather than the plain-
     directory one.
     """
     target = scaffold_extension("zipped-py", runtime="python", output_dir=tmp_path)
-    zip_path = tmp_path / "zipped-py.spotiflac-ext"
+    zip_path = tmp_path / "zipped-py.mornye-ext"
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in target.iterdir():
             zf.write(f, arcname=f.name)

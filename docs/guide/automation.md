@@ -2,7 +2,7 @@
 
 # Automation & Operations
 
-Everything here is for SpotiFLAC running as part of something else: a
+Everything here is for Mornye running as part of something else: a
 script, a cron job, a NAS container, a library pipeline.
 
 ---
@@ -12,7 +12,7 @@ script, a cron job, a NAS container, a library pipeline.
 Human output already goes to stderr, so stdout carries only the document:
 
 ```bash
-spotiflac "https://open.spotify.com/album/..." ~/Music --json | jq '.summary'
+mornye "https://open.spotify.com/album/..." ~/Music --json | jq '.summary'
 ```
 
 ```json
@@ -56,7 +56,7 @@ instead of a shell string:
 
 ```python
 # mylib/hooks.py
-from SpotiFLAC.core.models import DownloadResult, TrackMetadata
+from mornye.core.models import DownloadResult, TrackMetadata
 
 def on_track(result: DownloadResult, metadata: TrackMetadata) -> None:
     if result.success:
@@ -64,7 +64,7 @@ def on_track(result: DownloadResult, metadata: TrackMetadata) -> None:
 ```
 
 ```bash
-spotiflac "<url>" ~/Music --post-hook mylib.hooks:on_track
+mornye "<url>" ~/Music --post-hook mylib.hooks:on_track
 ```
 
 Repeatable. `async def` hooks are awaited; synchronous ones run in a worker
@@ -81,7 +81,7 @@ filenames with quotes or semicolons have to be escaped by whoever wrote the
 template, and an album title is not a safe string. It also runs once per
 batch, not per track. It still exists for the CLI, where you already had a
 shell — but it is refused from the GUI and web API unless
-`SPOTIFLAC_ALLOW_POST_COMMAND=1` was set when the process started.
+`MORNYE_ALLOW_POST_COMMAND=1` was set when the process started.
 
 ---
 
@@ -93,25 +93,25 @@ general one.
 
 ```bash
 # One message per run, to a Discord webhook (the default: --notify-on summary)
-spotiflac <url> ~/Music --notify discord --notify-url "https://discord.com/api/webhooks/…"
+mornye <url> ~/Music --notify discord --notify-url "https://discord.com/api/webhooks/…"
 
 # A message for every failed track, to a self-hosted ntfy
-spotiflac <url> ~/Music --notify ntfy --notify-url "http://nas.local:8080/music" \
+mornye <url> ~/Music --notify ntfy --notify-url "http://nas.local:8080/music" \
                         --notify-on failure
 
 # Telegram takes a bot token and a chat id rather than a URL
-spotiflac <url> ~/Music --notify telegram --notify-token "$BOT_TOKEN" \
+mornye <url> ~/Music --notify telegram --notify-token "$BOT_TOKEN" \
                         --notify-chat-id 123456
 
 # A plain webhook receives the structured JSON, not a sentence
-spotiflac <url> ~/Music --notify webhook --notify-url https://example.com/hook
+mornye <url> ~/Music --notify webhook --notify-url https://example.com/hook
 ```
 
 | Flag | Values |
 | --- | --- |
 | `--notify` | `webhook`, `discord`, `telegram`, `ntfy` |
-| `--notify-url` | Destination. Falls back to `$SPOTIFLAC_NOTIFY_URL`. |
-| `--notify-token` | Bearer token (ntfy, webhook) or bot token (Telegram). Falls back to `$SPOTIFLAC_NOTIFY_TOKEN`. |
+| `--notify-url` | Destination. Falls back to `$MORNYE_NOTIFY_URL`. |
+| `--notify-token` | Bearer token (ntfy, webhook) or bot token (Telegram). Falls back to `$MORNYE_NOTIFY_TOKEN`. |
 | `--notify-chat-id` | Telegram only. |
 | `--notify-on` | `summary` (default), `success`, `failure`, `both` |
 
@@ -142,7 +142,7 @@ one.
 Write an M3U of everything a run downloaded:
 
 ```bash
-spotiflac "<url>" ~/Music --write-m3u ~/Music/latest.m3u8
+mornye "<url>" ~/Music --write-m3u ~/Music/latest.m3u8
 ```
 
 Paths are relative to the playlist file, so the folder stays portable.
@@ -151,8 +151,8 @@ Tell a music server to rescan when the run finishes, instead of waiting for
 its own schedule:
 
 ```bash
-export SPOTIFLAC_LIBRARY_TOKEN="..."
-spotiflac "<url>" /media/music \
+export MORNYE_LIBRARY_TOKEN="..."
+mornye "<url>" /media/music \
   --library-rescan jellyfin --library-url http://nas.local:8096
 ```
 
@@ -162,7 +162,7 @@ spotiflac "<url>" /media/music \
 | `jellyfin`, `emby` | API key | |
 | `navidrome`, `subsonic` | Password + `--library-user` | Salted-hash auth; the password never travels in the URL |
 
-The token comes from `--library-token` or `$SPOTIFLAC_LIBRARY_TOKEN` — never
+The token comes from `--library-token` or `$MORNYE_LIBRARY_TOKEN` — never
 from a GUI or web request, which must not get to choose which host a
 credential is sent to. A server that is down is logged and ignored: the
 files are on disk either way.
@@ -174,9 +174,9 @@ API, not chosen here, and the server compares against the same digest. It is
 the strongest of the three options Subsonic accepts (the other two send the
 password in the query string), but it means the value on the wire is
 derived from your password and can be attacked offline if captured. Use
-`https://`, and give SpotiFLAC an account you use for nothing else.
+`https://`, and give Mornye an account you use for nothing else.
 
-SpotiFLAC warns whenever a library URL is plain `http://` and not loopback —
+Mornye warns whenever a library URL is plain `http://` and not loopback —
 for every server type, because a Plex or Jellyfin token is equally readable
 on the path and stays valid until you revoke it. It warns rather than
 refuses: a NAS on a home LAN is the deployment this feature exists for, and
@@ -199,8 +199,8 @@ from zero, and `.part` files are cleaned up at the end.
 ## What has been downloaded (`--stats`)
 
 ```bash
-spotiflac --stats                 # everything
-spotiflac --stats --stats-year 2026 --json
+mornye --stats                 # everything
+mornye --stats --stats-year 2026 --json
 ```
 
 Totals, top artists/genres/decades, providers and formats, a month-by-month
@@ -214,14 +214,14 @@ document for a script; the GUI shows it as the **Stats** screen. Full detail:
 ## Cache maintenance
 
 ```bash
-spotiflac --cache-stats                       # what's on disk
-spotiflac --cache-prune --dry-run             # what would go
-spotiflac --cache-prune --cache-max-age-days 30
-spotiflac --cache-clear                       # everything disposable
+mornye --cache-stats                       # what's on disk
+mornye --cache-prune --dry-run             # what would go
+mornye --cache-prune --cache-max-age-days 30
+mornye --cache-clear                       # everything disposable
 ```
 
 `--cache-clear` keeps `profiles.json` and `gui-settings.json`: they live in
-the same directory but hold things you typed, not things SpotiFLAC can
+the same directory but hold things you typed, not things Mornye can
 re-fetch. Add `--json` to any of these for parseable output.
 
 ---
@@ -254,8 +254,8 @@ through the browser — the login form appears automatically when the server
 says one is needed.
 
 ```bash
-spotiflac --web-user-add alice 'a-good-password'
-spotiflac --web --host 0.0.0.0 --web-multiuser
+mornye --web-user-add alice 'a-good-password'
+mornye --web --host 0.0.0.0 --web-multiuser
 ```
 
 Still shared, because it is genuinely machine-wide: installed extensions,

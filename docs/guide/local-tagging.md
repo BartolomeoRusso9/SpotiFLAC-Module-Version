@@ -22,14 +22,14 @@ The Local Tagging system works in **three phases**:
 
 ### Supported Audio Formats
 
-Scans and tags any format that SpotiFLAC can write: FLAC, MP3, M4A/AAC, OGG Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, TrueAudio.
+Scans and tags any format that Mornye can write: FLAC, MP3, M4A/AAC, OGG Vorbis, Opus, WAV, AIFF, WMA, WavPack, Monkey's Audio, Musepack, TrueAudio.
 
 ### Using the GUI / Web Interface
 
 Open the **"Fix Local Files"** tab and follow the wizard:
 
 1. **Choose a folder** — browse to your music directory (or drag & drop a folder onto the interface)
-2. **Review matches** — SpotiFLAC scans, matches, and displays each file with up to 5 candidate matches, sorted by confidence (0–100)
+2. **Review matches** — Mornye scans, matches, and displays each file with up to 5 candidate matches, sorted by confidence (0–100)
 3. **Select metadata** — for each file, choose which match to apply, or skip it entirely
 4. **Preview changes** — see what tags will be written before applying
 5. **Apply** — apply all changes at once with progress tracking and automatic per-file backup
@@ -40,12 +40,12 @@ Files with confidence ≥ 90% are marked as "safe to auto-apply"; files below th
 
 ```python
 import asyncio
-from SpotiFLAC.core.local_processor import (
+from mornye.core.local_processor import (
     scan_and_match_async,
     retag_local_file_async,
     default_embed_options,
 )
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.core.models import TrackMetadata
 
 async def fix_library(folder_path: str) -> None:
     # Phase 1 & 2: scan folder and find matches for each file
@@ -107,7 +107,7 @@ If something goes wrong during the apply step, the backup is restored and the op
 Fine-tune embedding options for specific use cases:
 
 ```python
-from SpotiFLAC.core.tagger import EmbedOptions
+from mornye.core.tagger import EmbedOptions
 
 custom_opts = EmbedOptions(
     embed_cover=True,
@@ -128,13 +128,13 @@ result = await retag_local_file_async(
 
 Local Tagging's own dedup (above) matches by ISRC or by normalized title+artist text — cheap and usually right, but blind to a re-rip with wrong or missing tags, or the same recording pulled from two different providers with slightly different metadata. This is a second, independent signal that looks at the *audio itself* instead: [Chromaprint](https://acoustid.org/chromaprint) acoustic fingerprints, compared locally — no network call, no AcoustID lookup, no API key.
 
-Off by default, and the one thing it needs is not a Python package: `pyacoustid` ships with SpotiFLAC, but it is a wrapper around `fpcalc`, a system binary pip cannot install for you.
+Off by default, and the one thing it needs is not a Python package: `pyacoustid` ships with Mornye, but it is a wrapper around `fpcalc`, a system binary pip cannot install for you.
 
 ```bash
 # install fpcalc — most package managers ship it as "chromaprint" or
 # "libchromaprint-tools" (see https://acoustid.org/chromaprint)
 
-python -m SpotiFLAC.tools.dedup_check_cli ~/Music/MyLibrary
+python -m mornye.tools.dedup_check_cli ~/Music/MyLibrary
 ```
 
 ```text
@@ -150,7 +150,7 @@ Group 1 (2 files):
 Also available as a "Find Duplicates" button in the GUI's Fix Local Files tab (same folder path as a normal scan), backed by `get_dedup_status()` (whether it can run at all on this machine) and `scan_for_duplicates(path, recursive=True, threshold=0.95)` (runs in a background thread; results arrive via the `app_dedup_results` push event, `app_dedup_error` on failure — same shape as `scan_local()`), or directly in Python:
 
 ```python
-from SpotiFLAC.core.audio_fingerprint import (
+from mornye.core.audio_fingerprint import (
     compute_fingerprint, find_duplicate_groups, is_available,
 )
 
@@ -173,13 +173,13 @@ there, and — when told to twice — resolves them.
 
 ```bash
 # Report only. Always start here.
-spotiflac --dedup-library ~/Music
+mornye --dedup-library ~/Music
 
 # Move the redundant copies into a quarantine folder (undoable).
-spotiflac --dedup-library ~/Music --dedup-apply
+mornye --dedup-library ~/Music --dedup-apply
 
 # Changed your mind:
-spotiflac --dedup-restore ~/Music/.spotiflac-duplicates/dedup-20260901-011058.json
+mornye --dedup-restore ~/Music/.mornye-duplicates/dedup-20260901-011058.json
 ```
 
 ```text
@@ -247,7 +247,7 @@ from the Python API.
 
 Two deliberate decisions, not one: the scan reports, `--dedup-apply` acts.
 
-- **Quarantine (default).** Redundant copies move into `.spotiflac-duplicates`
+- **Quarantine (default).** Redundant copies move into `.mornye-duplicates`
   inside the library (`--dedup-trash DIR` to put it elsewhere), mirroring the
   library's layout, and a manifest records every move. The folder is dotted,
   so the next scan does not walk back into it and re-find what it just moved.
@@ -266,7 +266,7 @@ skipped.
 The scan costs a header read and a tag read per file, cached per path against
 the file's mtime and size — a 4,000-file library scans in about a second on
 local disk and rescans in a third of that. The cache lives in
-`~/.spotiflac/.cache/library-dedup/` (`--dedup-no-cache` to ignore it) and is
+`~/.mornye/.cache/library-dedup/` (`--dedup-no-cache` to ignore it) and is
 checkpointed as it goes: a scan that dies halfway costs the files since the
 last checkpoint, not the whole walk.
 
@@ -278,7 +278,7 @@ an index of the library that something else can read — another tool, another
 machine, a query typed into `sqlite3` — not just a list of duplicates.
 
 ```bash
-spotiflac --dedup-library ~/Music --dedup-db ~/library.db
+mornye --dedup-library ~/Music --dedup-db ~/library.db
 ```
 
 | Table | What's in it |
@@ -307,8 +307,8 @@ not happen in the same process, on the same machine, or on the same day —
 a NAS can index overnight and a laptop can act on the result.
 
 ```bash
-spotiflac --dedup-library /volume1/music --dedup-db /volume1/music-index.db   # on the NAS
-spotiflac --dedup-from-db ~/music-index.db --dedup-apply                      # anywhere
+mornye --dedup-library /volume1/music --dedup-db /volume1/music-index.db   # on the NAS
+mornye --dedup-from-db ~/music-index.db --dedup-apply                      # anywhere
 ```
 
 Size and mtime travel in the database, and the resolver re-checks both before
@@ -351,7 +351,7 @@ last scan actually reported as redundant.
 ### From Python
 
 ```python
-from SpotiFLAC.core.library_dedup import (
+from mornye.core.library_dedup import (
     export_sqlite, load_report, resolve_duplicates, restore_manifest,
     scan_duplicates,
 )
@@ -375,7 +375,7 @@ resolve_duplicates(load_report("~/library.db"), dry_run=False)
 ```
 
 `report.to_dict()` is the recap and every group as JSON, which
-`spotiflac --dedup-library ~/Music --json` prints; `to_dict(include_files=True)`
+`mornye --dedup-library ~/Music --json` prints; `to_dict(include_files=True)`
 adds every scanned file, though for a library of that size the `.db` is the
 better shape for it.
 
@@ -403,7 +403,7 @@ The same thing runs standalone, for a machine that has the package but no
 reason to start the GUI:
 
 ```bash
-python -m SpotiFLAC.tools.library_dedup_cli ~/Music --verify --verbose
+python -m mornye.tools.library_dedup_cli ~/Music --verify --verbose
 ```
 
 ---
@@ -411,7 +411,7 @@ python -m SpotiFLAC.tools.library_dedup_cli ~/Music --verify --verbose
 
 ## MusicBrainz Enrichment
 
-SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is available) while the audio is being downloaded, adding professional-grade tags at no extra time cost. Fields written when found:
+Mornye automatically queries MusicBrainz in the background (when an ISRC is available) while the audio is being downloaded, adding professional-grade tags at no extra time cost. Fields written when found:
 
 | Tag | Description |
 | --- | --- |
@@ -427,7 +427,7 @@ SpotiFLAC automatically queries MusicBrainz in the background (when an ISRC is a
 
 ## Download Validation
 
-After each download, SpotiFLAC validates the file to detect common issues:
+After each download, Mornye validates the file to detect common issues:
 
 - **Preview detection** — if the expected duration is ≥ 60 s but the downloaded file is ≤ 35 s, the file is deleted and the download is retried with the next extension.
 - **Duration mismatch** — for tracks longer than 90 s, a deviation greater than 25% (or 15 s minimum) from the expected duration is treated as a corrupt download and the file is removed.

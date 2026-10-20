@@ -13,7 +13,7 @@ brackets mark optional arguments, and each option is on its own line for
 readability. Marked `text` rather than `bash` so nothing suggests otherwise.
 
 ```text
-./SpotiFLAC-Windows.exe url
+./Mornye-Windows.exe url
                         output_dir
                         [--csv tracks.csv]
                         [--service ext:<id> [ext:<id> ...]]
@@ -45,8 +45,8 @@ readability. Marked `text` rather than `bash` so nothing suggests otherwise.
 ```
 
 ```bash
-chmod +x SpotiFLAC-Linux-arm64
-./SpotiFLAC-Linux-arm64 url
+chmod +x Mornye-Linux-arm64
+./Mornye-Linux-arm64 url
                         output_dir
                         [--csv tracks.csv]
                         [--service ext:<id> [ext:<id> ...]]

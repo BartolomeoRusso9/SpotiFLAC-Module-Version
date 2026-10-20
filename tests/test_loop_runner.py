@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import loop_runner
+from mornye.core import loop_runner
 
 
 @pytest.fixture(autouse=True)
@@ -130,7 +130,7 @@ def test_the_loop_thread_is_a_daemon() -> None:
     should exit, not hang waiting for an idle loop.
     """
     loop_runner.run_coro(_echo(1))
-    thread = next(t for t in threading.enumerate() if t.name == "spotiflac-loop")
+    thread = next(t for t in threading.enumerate() if t.name == "mornye-loop")
     assert thread.daemon
 
 

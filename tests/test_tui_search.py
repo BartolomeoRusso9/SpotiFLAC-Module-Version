@@ -15,9 +15,9 @@ import pytest
 
 from tui_harness import app_of, drives_the_ui
 
-from SpotiFLAC.tui.app import MODES, SpotiFLACTui
-from SpotiFLAC.tui.config_state import ConfigState
-from SpotiFLAC.tui.search_view import SearchPanel
+from mornye.tui.app import MODES, MornyeTui
+from mornye.tui.config_state import ConfigState
+from mornye.tui.search_view import SearchPanel
 
 _SEARCH_INDEX = [key for key, _ in MODES].index("search")
 
@@ -58,14 +58,14 @@ def stub_search(monkeypatch) -> Any:
         queries.append(query)
         return _RESULTS
 
-    import SpotiFLAC.api_mixins.search as search_module
+    import mornye.api_mixins.search as search_module
 
     monkeypatch.setattr(search_module, "search_metadata_async", _search)
     return queries
 
 
 def _ready_state() -> ConfigState:
-    return ConfigState(output_dir="/tmp/spotiflac-test", services=["tidal"])
+    return ConfigState(output_dir="/tmp/mornye-test", services=["tidal"])
 
 
 async def _settled(pilot) -> None:
@@ -75,7 +75,7 @@ async def _settled(pilot) -> None:
 
 @drives_the_ui
 async def test_slash_goes_to_the_search_box(stub_search) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").focus()
         await pilot.pause()
 
@@ -88,7 +88,7 @@ async def test_slash_goes_to_the_search_box(stub_search) -> None:
 
 @drives_the_ui
 async def test_results_are_listed_and_linkless_ones_dropped(stub_search) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
@@ -107,7 +107,7 @@ async def test_results_are_listed_and_linkless_ones_dropped(stub_search) -> None
 
 @drives_the_ui
 async def test_picking_a_result_fills_the_download_url(stub_search) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
@@ -133,7 +133,7 @@ async def test_picking_a_result_fills_the_download_url(stub_search) -> None:
 
 @drives_the_ui
 async def test_an_empty_query_is_not_searched(stub_search) -> None:
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
@@ -152,11 +152,11 @@ async def test_a_failing_search_is_reported_not_raised(monkeypatch) -> None:
         msg = "spotify said no"
         raise RuntimeError(msg)
 
-    import SpotiFLAC.api_mixins.search as search_module
+    import mornye.api_mixins.search as search_module
 
     monkeypatch.setattr(search_module, "search_metadata_async", _explode)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 
@@ -173,11 +173,11 @@ async def test_nothing_found_says_so(monkeypatch) -> None:
     async def _nothing(query, limit=50):
         return {"tracks": [], "albums": [], "artists": [], "playlists": []}
 
-    import SpotiFLAC.api_mixins.search as search_module
+    import mornye.api_mixins.search as search_module
 
     monkeypatch.setattr(search_module, "search_metadata_async", _nothing)
 
-    async with SpotiFLACTui(_ready_state()).run_test() as pilot:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
         app_of(pilot).query_one("#sidebar").index = _SEARCH_INDEX
         await _settled(pilot)
 

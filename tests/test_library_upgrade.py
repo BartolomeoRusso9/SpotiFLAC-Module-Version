@@ -14,8 +14,8 @@ import subprocess
 
 import pytest
 
-from SpotiFLAC.core import library_upgrade as lu
-from SpotiFLAC.core.library_upgrade import (
+from mornye.core import library_upgrade as lu
+from mornye.core.library_upgrade import (
     TIER_HIRES,
     TIER_LOSSLESS,
     TIER_LOSSY,

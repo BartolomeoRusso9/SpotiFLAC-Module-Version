@@ -1,9 +1,9 @@
 # The REST API (`/api/v1`)
 
-`spotiflac --web` serves two HTTP surfaces.
+`mornye --web` serves two HTTP surfaces.
 
 The older one, `POST /api/<method_name>`, is an RPC bridge onto the same
-`SpotiFLAC_API` object the desktop window uses. It exists so the frontend and
+`MornyeAPI` object the desktop window uses. It exists so the frontend and
 the desktop GUI share one implementation, and it stays exactly as it was. It
 is not a contract: the names are GUI internals, there is no schema, and
 renaming a method to tidy the desktop code would silently break anything else
@@ -13,7 +13,7 @@ pointed at it.
 document, and only the endpoints an integrator actually needs.
 
 ```bash
-spotiflac --web --port 8000
+mornye --web --port 8000
 open http://127.0.0.1:8000/docs        # interactive OpenAPI browser
 curl http://127.0.0.1:8000/openapi.json
 ```
@@ -135,7 +135,7 @@ for what the grouping actually decides and why.
 
 **Read-only, deliberately.** It reports which copy to keep and never acts on
 that: removing files needs a second explicit step, and that step lives on the
-command line (`spotiflac --dedup-library … --dedup-apply`) and in the GUI
+command line (`mornye --dedup-library … --dedup-apply`) and in the GUI
 panel, both of which can quarantine rather than delete and can undo
 themselves. An HTTP call that deletes from a music library is not something to
 add because the read side happened to be useful.
@@ -167,11 +167,11 @@ Accounts used to be flat. There are now two roles, and optional per-account
 limits.
 
 ```bash
-spotiflac --web-user-add alice hunter2 --role admin
-spotiflac --web-user-add bob   hunter2 --daily-tracks 100 --daily-mb 5000
-spotiflac --web-user-list
-spotiflac --web-user-quota bob --daily-tracks 50
-spotiflac --web-user-role bob admin
+mornye --web-user-add alice hunter2 --role admin
+mornye --web-user-add bob   hunter2 --daily-tracks 100 --daily-mb 5000
+mornye --web-user-list
+mornye --web-user-quota bob --daily-tracks 50
+mornye --web-user-role bob admin
 ```
 
 `0` means unlimited, which is the default — an instance that never sets a
@@ -207,7 +207,7 @@ administer, recoverable only by hand-editing `web_users.json`.
 ## Durability
 
 The queue, the download log and subscriptions live in a SQLite database
-(`~/.spotiflac/spotiflac.db`, overridable with `$SPOTIFLAC_DB_PATH`).
+(`~/.mornye/mornye.db`, overridable with `$MORNYE_DB_PATH`).
 
 In `--web-multiuser` the queue is persistent: a job queued before a restart is
 picked up after it. A job that was *running* when the process died is re-queued

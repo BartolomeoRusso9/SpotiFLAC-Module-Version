@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from SpotiFLAC.core.job_queue import JobQueue, JobStatus
+from mornye.core.job_queue import JobQueue, JobStatus
 
 
 def _wait_until(predicate, timeout=2.0) -> None:

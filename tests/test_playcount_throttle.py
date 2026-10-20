@@ -14,10 +14,10 @@ from __future__ import annotations
 import threading
 import time
 
-from SpotiFLAC.app import (
+from mornye.app import (
     PLAYCOUNT_MIN_INTERVAL_S,
     PLAYCOUNT_WORKERS,
-    SpotiFLAC_API,
+    MornyeAPI,
 )
 
 
@@ -37,8 +37,8 @@ class _RecordingClient:
         return {"playcount": "42", "rank": "", "status": ""}
 
 
-def _api(download_dir=None) -> SpotiFLAC_API:
-    api = SpotiFLAC_API()
+def _api(download_dir=None) -> MornyeAPI:
+    api = MornyeAPI()
     api.log = lambda *a, **k: None  # type: ignore[method-assign]
     if download_dir is not None:
         # _download_task() mkdirs this before doing anything else, so a test

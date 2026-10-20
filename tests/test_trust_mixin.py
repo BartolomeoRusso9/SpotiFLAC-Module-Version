@@ -4,16 +4,16 @@ crypto/logic is covered by tests/test_trust.py.
 
 from __future__ import annotations
 
-from SpotiFLAC.api_mixins.trust import TrustMixin
-from SpotiFLAC.app import SpotiFLAC_API
-from SpotiFLAC.extensions import trust
-from SpotiFLAC.webapp import ALLOWED_METHODS
+from mornye.api_mixins.trust import TrustMixin
+from mornye.app import MornyeAPI
+from mornye.extensions import trust
+from mornye.webapp import ALLOWED_METHODS
 
 
 def test_trust_methods_resolve_to_the_mixin() -> None:
     for name in ("get_trusted_keys", "add_trusted_key", "remove_trusted_key"):
         assert name in TrustMixin.__dict__
-        assert getattr(SpotiFLAC_API, name).__qualname__.startswith("TrustMixin.")
+        assert getattr(MornyeAPI, name).__qualname__.startswith("TrustMixin.")
 
 
 def test_only_reading_the_trust_store_is_exposed_over_http() -> None:
@@ -44,7 +44,7 @@ def test_add_get_remove_trusted_key_round_trip(tmp_path, monkeypatch) -> None:
         )
     ).decode()
 
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     assert api.get_trusted_keys() == []
 
     added = api.add_trusted_key("alice", pub_b64)
@@ -60,6 +60,6 @@ def test_add_get_remove_trusted_key_round_trip(tmp_path, monkeypatch) -> None:
 
 def test_add_trusted_key_reports_error_for_invalid_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(trust, "TRUSTED_KEYS_FILE", tmp_path / "trusted_keys.json")
-    api = SpotiFLAC_API()
+    api = MornyeAPI()
     result = api.add_trusted_key("alice", "garbage")
     assert result["ok"] is False

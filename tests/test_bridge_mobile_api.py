@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.runtime import JSRuntime
+from mornye.extensions.runtime import JSRuntime
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real bridge"
@@ -200,7 +200,7 @@ def private_network(monkeypatch):
     # The echo server is on loopback, which the extension network guard
     # refuses; the runtime above was started before this could apply, so
     # these tests use a runtime of their own.
-    monkeypatch.setenv("SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK", "1")
+    monkeypatch.setenv("MORNYE_EXT_ALLOW_PRIVATE_NETWORK", "1")
 
 
 @pytest.fixture

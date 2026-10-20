@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.runtime import JSRuntime
+from mornye.extensions.runtime import JSRuntime
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real bridge"

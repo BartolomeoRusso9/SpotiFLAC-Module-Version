@@ -1,4 +1,4 @@
-"""`--min-trust-tier` / $SPOTIFLAC_MIN_TRUST — refusing registry entries
+"""`--min-trust-tier` / $MORNYE_MIN_TRUST — refusing registry entries
 below a chosen assurance level.
 
 Before this existed, `trust_tier` was computed and then only ever rendered
@@ -14,15 +14,15 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from SpotiFLAC.extensions import trust
-from SpotiFLAC.extensions.manager import (
+from mornye.extensions import trust
+from mornye.extensions.manager import (
     ExtensionManager,
     RegistryEntry,
     TrustRejectedError,
 )
 
 SHA = "a" * 64
-URL = "https://example.invalid/ext.spotiflac-ext"
+URL = "https://example.invalid/ext.mornye-ext"
 
 
 @pytest.fixture(autouse=True)
@@ -97,7 +97,7 @@ def test_a_misspelled_floor_is_rejected_rather_than_ignored() -> None:
 
 
 def test_default_floor_keeps_the_historical_behaviour(tmp_path) -> None:
-    """No registry ships with SpotiFLAC, so defaulting to anything above
+    """No registry ships with Mornye, so defaulting to anything above
     'unverified' would make a fresh install unable to install anything.
     """
     assert _manager(tmp_path).min_trust_tier == "unverified"
@@ -171,7 +171,7 @@ def test_a_local_file_install_is_not_gated(tmp_path) -> None:
         )
         zf.writestr("index.js", "module.exports = {};")
 
-    path = tmp_path / "local.spotiflac-ext"
+    path = tmp_path / "local.mornye-ext"
     path.write_bytes(buf.getvalue())
 
     mgr = _manager(tmp_path, "signed")

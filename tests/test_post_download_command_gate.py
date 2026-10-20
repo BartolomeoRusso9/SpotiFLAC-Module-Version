@@ -1,6 +1,6 @@
 """The GUI/web bridge must not let its caller choose a shell command.
 
-Every method on SpotiFLAC_API is reachable two ways: bound wholesale as
+Every method on MornyeAPI is reachable two ways: bound wholesale as
 pywebview's `js_api` in desktop mode (so any JS running in the window can
 call it), and — in `--web` mode — as a POST /api/<method> endpoint, where
 the "caller" is whoever can reach the port and `config` is just a JSON
@@ -9,7 +9,7 @@ BatchFinalizer.execute_post_action(), which runs it through a shell, so
 taking it from that dict makes the two indistinguishable.
 
 The CLI path is deliberately not covered here: it never goes through this
-class (launcher.py builds client.SpotiFLAC directly), and someone who can
+class (launcher.py builds client.Mornye directly), and someone who can
 already type a shell command into their own shell gains nothing by typing
 it into ours.
 """
@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from SpotiFLAC.app import POST_COMMAND_ENV, SpotiFLAC_API
+from mornye.app import POST_COMMAND_ENV, MornyeAPI
 from tests.application_download_capture import capture_service
 
 
@@ -38,7 +38,7 @@ def captured_options(tmp_path, monkeypatch) -> Any:
     capture_service(monkeypatch, seen)
 
     def _run(config: dict) -> dict:
-        api = SpotiFLAC_API()
+        api = MornyeAPI()
         api.download_dir = str(tmp_path)
         api.current_tracks = [_FakeTrack()]
         api.current_url = _FakeTrack.external_url
@@ -57,7 +57,7 @@ def test_command_action_from_the_bridge_is_dropped_by_default(
     opts = captured_options(
         {
             "post_download_action": "command",
-            "post_download_command": "touch /tmp/spotiflac-pwned",
+            "post_download_command": "touch /tmp/mornye-pwned",
         }
     )
 

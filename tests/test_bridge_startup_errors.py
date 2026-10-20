@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from SpotiFLAC.extensions.runtime import ExtensionRuntimeError, JSRuntime
+from mornye.extensions.runtime import ExtensionRuntimeError, JSRuntime
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="needs Node to exercise the real bridge"
@@ -67,7 +67,7 @@ def test_a_node_that_refuses_its_options_is_not_blamed_on_the_js(
     # A rejected NODE_OPTIONS flag is the failure mode that looks least like
     # what the old message claimed: the extension is fine and never runs.
     monkeypatch.setenv("NODE_OPTIONS", "--no-such-flag-exists")
-    monkeypatch.setenv("SPOTIFLAC_EXT_NO_SANDBOX", "1")  # keep NODE_OPTIONS
+    monkeypatch.setenv("MORNYE_EXT_NO_SANDBOX", "1")  # keep NODE_OPTIONS
     ext = tmp_path / "fine.js"
     ext.write_text("registerExtension({ initialize: function () {} });")
 

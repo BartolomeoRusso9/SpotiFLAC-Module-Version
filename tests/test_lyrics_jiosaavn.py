@@ -1,4 +1,4 @@
-from SpotiFLAC.core.lyrics import (
+from mornye.core.lyrics import (
     DEFAULT_LYRICS_PROVIDERS,
     _best_jiosaavn_result,
 )

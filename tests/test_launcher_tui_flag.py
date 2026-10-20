@@ -16,7 +16,7 @@ import warnings
 
 import pytest
 
-from SpotiFLAC import launcher
+from mornye import launcher
 
 
 @pytest.fixture
@@ -45,21 +45,21 @@ def run_launcher(monkeypatch) -> Any:
     # asyncio.run(), and the bug this guards against was `run_tui` opening a
     # *second* loop. Replacing run_tui_async would have skipped the very code
     # that raised, and the tests would have stayed green through it.
-    import SpotiFLAC.tui.app as tui_app
+    import mornye.tui.app as tui_app
 
     async def _fake_run_async(self):
         opened.append(True)
 
-    monkeypatch.setattr(tui_app.SpotiFLACTui, "run_async", _fake_run_async)
+    monkeypatch.setattr(tui_app.MornyeTui, "run_async", _fake_run_async)
 
-    import SpotiFLAC.core.ffmpeg_check as ffmpeg_check
-    import SpotiFLAC.core.node_check as node_check
+    import mornye.core.ffmpeg_check as ffmpeg_check
+    import mornye.core.node_check as node_check
 
     monkeypatch.setattr(ffmpeg_check, "print_ffmpeg_warning", lambda *a, **k: None)
     monkeypatch.setattr(node_check, "print_node_warning", lambda *a, **k: None)
 
     def _run(argv: list[str]) -> bool:
-        monkeypatch.setattr("sys.argv", ["spotiflac", *argv])
+        monkeypatch.setattr("sys.argv", ["mornye", *argv])
         opened.clear()
         asyncio.run(launcher.amain())
         return bool(opened)
@@ -104,7 +104,7 @@ def test_the_tui_runs_on_the_launcher_own_loop(run_launcher) -> None:
     import asyncio
     import inspect
 
-    from SpotiFLAC.tui.app import run_tui_async
+    from mornye.tui.app import run_tui_async
 
     assert inspect.iscoroutinefunction(run_tui_async)
     assert run_launcher(["--tui"]) is True
@@ -122,7 +122,7 @@ def test_tui_alone_does_not_warn(run_launcher) -> None:
 
 
 def test_the_wizard_is_gone() -> None:
-    """`SpotiFLAC/interactive.py` was deleted, not merely bypassed.
+    """`mornye/interactive.py` was deleted, not merely bypassed.
 
     `--interactive` still parses and still warns — that is the deprecation —
     but there is no second guided frontend behind it any more, which was the
@@ -130,7 +130,7 @@ def test_the_wizard_is_gone() -> None:
     """
     import importlib.util
 
-    assert importlib.util.find_spec("SpotiFLAC.interactive") is None
+    assert importlib.util.find_spec("mornye.interactive") is None
 
     import ast
     import inspect

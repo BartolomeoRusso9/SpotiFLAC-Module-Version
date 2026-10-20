@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from SpotiFLAC.extensions import directories
+from mornye.extensions import directories
 
 
 @pytest.fixture(autouse=True)
@@ -132,7 +132,7 @@ def test_probe_registry_reports_reachable(httpx_mock):
                     "display_name": "Foo",
                     "version": "1.0.0",
                     "description": "",
-                    "download_url": "https://x.example.com/foo.spotiflac-ext",
+                    "download_url": "https://x.example.com/foo.mornye-ext",
                 },
             ],
         },

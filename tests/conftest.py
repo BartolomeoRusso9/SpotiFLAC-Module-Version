@@ -4,7 +4,7 @@ The suite was reaching the network and installing real extensions. Any test
 that builds the `--web` app runs its lifespan, which constructs an
 `ExtensionManager` with `auto_install_downloads=True`; that reads whatever
 registries the developer happens to have in `.env` or the environment,
-downloads whatever they list, and unpacks it into `~/.spotiflac/extensions`.
+downloads whatever they list, and unpacks it into `~/.mornye/extensions`.
 
 So the suite was slow, dependent on someone else's server being up, and
 capable of modifying the machine it ran on — and its results depended on
@@ -33,7 +33,7 @@ def _no_registry_bootstrap(request, monkeypatch):
     if request.node.get_closest_marker("uses_registry"):
         return
 
-    from SpotiFLAC.extensions.manager import ExtensionManager
+    from mornye.extensions.manager import ExtensionManager
 
     monkeypatch.setattr(
         ExtensionManager,
@@ -46,8 +46,8 @@ def _no_registry_bootstrap(request, monkeypatch):
 def _isolated_download_dir(request, monkeypatch, tmp_path_factory):
     """Keeps the suite out of the user's real music library.
 
-    `SpotiFLAC_API.__init__` starts every instance at DEFAULT_DOWNLOAD_DIR —
-    ~/Music/SpotiFLAC — and several code paths mkdir it before doing
+    `MornyeAPI.__init__` starts every instance at DEFAULT_DOWNLOAD_DIR —
+    ~/Music/Mornye — and several code paths mkdir it before doing
     anything else. `--web-multiuser` is the loud one: webapp's ApiRegistry
     gives each account its own folder under the base download dir, so
     merely logging a test account in left `alice-2bd806c9` and
@@ -63,7 +63,7 @@ def _isolated_download_dir(request, monkeypatch, tmp_path_factory):
     anyway, so patching it buys nothing and makes the two disagree — which
     is a difference some tests quite reasonably assert on.
 
-    The stand-in still ends in "Music/SpotiFLAC": that suffix is itself
+    The stand-in still ends in "Music/Mornye": that suffix is itself
     asserted, and a temporary directory is no reason to change the shape of
     the path under test.
     """
@@ -72,16 +72,16 @@ def _isolated_download_dir(request, monkeypatch, tmp_path_factory):
 
     import os
 
-    stand_in = os.path.join(str(tmp_path_factory.mktemp("home")), "Music", "SpotiFLAC")
-    monkeypatch.setattr("SpotiFLAC.app.DEFAULT_DOWNLOAD_DIR", stand_in)
+    stand_in = os.path.join(str(tmp_path_factory.mktemp("home")), "Music", "Mornye")
+    monkeypatch.setattr("mornye.app.DEFAULT_DOWNLOAD_DIR", stand_in)
 
 
 @pytest.fixture(autouse=True)
 def _isolated_extension_dir(request, monkeypatch, tmp_path_factory):
-    """Keeps anything that *does* install from touching ~/.spotiflac."""
+    """Keeps anything that *does* install from touching ~/.mornye."""
     if request.node.get_closest_marker("uses_real_ext_dir"):
         return
-    monkeypatch.setenv("SPOTIFLAC_EXT_DIR", str(tmp_path_factory.mktemp("extensions")))
+    monkeypatch.setenv("MORNYE_EXT_DIR", str(tmp_path_factory.mktemp("extensions")))
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +95,7 @@ def _no_extension_enrichment(request, monkeypatch):
     """
     if request.node.get_closest_marker("uses_extension_enrichment"):
         return
-    monkeypatch.setenv("SPOTIFLAC_ENRICH_EXTENSIONS", "0")
+    monkeypatch.setenv("MORNYE_ENRICH_EXTENSIONS", "0")
 
 
 def pytest_configure(config):
@@ -138,7 +138,7 @@ def _no_system_clipboard(request, monkeypatch):
     """
     if request.node.get_closest_marker("uses_system_clipboard"):
         return
-    from SpotiFLAC.tui import clipboard
+    from mornye.tui import clipboard
 
     monkeypatch.setattr(clipboard, "_native_command", lambda: None)
 
@@ -147,13 +147,13 @@ def _no_system_clipboard(request, monkeypatch):
 def _isolated_database(monkeypatch, tmp_path_factory):
     """Points core/db.py at a throwaway file for every test.
 
-    Without this the suite would read and write ~/.spotiflac/spotiflac.db —
+    Without this the suite would read and write ~/.mornye/mornye.db —
     the developer's real queue, download log and subscriptions — for the same
     reasons _isolated_extension_dir exists.
     """
-    from SpotiFLAC.core import db
+    from mornye.core import db
 
-    db_file = tmp_path_factory.mktemp("db") / "spotiflac.db"
+    db_file = tmp_path_factory.mktemp("db") / "mornye.db"
     monkeypatch.setenv(db.DB_PATH_ENV, str(db_file))
     db.reset_for_tests()
     yield
@@ -165,7 +165,7 @@ def _capable_terminal(monkeypatch):
     """Pins the terminal capabilities the TUI reads, instead of inheriting.
 
     `branding.plain_terminal()` answers from NO_COLOR / TERM /
-    SPOTIFLAC_PLAIN_TUI, so every test that asserts how the TUI *looks* was
+    MORNYE_PLAIN_TUI, so every test that asserts how the TUI *looks* was
     really asserting something about the terminal that happened to run it:
     green under a developer's xterm, red under `NO_COLOR=1` and red on the
     Windows runner, which sets no TERM at all. Same class of leak as the
@@ -177,4 +177,4 @@ def _capable_terminal(monkeypatch):
     """
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.delenv("SPOTIFLAC_PLAIN_TUI", raising=False)
+    monkeypatch.delenv("MORNYE_PLAIN_TUI", raising=False)

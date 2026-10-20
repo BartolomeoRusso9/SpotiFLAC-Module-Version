@@ -1,24 +1,24 @@
-# Example compose file for SpotiFLAC's --web mode (see the "Web Mode in
+# Example compose file for Mornye's --web mode (see the "Web Mode in
 # Docker" section of README.md). Named *.example.yml — plain docker-compose.yml
 # is in .gitignore, presumably for a maintainer-local one — so this can be
 # committed and reviewed like any other file. Copy/rename it, adjust the
-# bind mount paths and SPOTIFLAC_REGISTRIES, and run:
+# bind mount paths and MORNYE_REGISTRIES, and run:
 #   docker compose -f docker-compose.example.yml up
 #
 # --web mode needs none of the Xvfb/VNC machinery the CLI/--gui paths use,
-# so this is the lightest way to run SpotiFLAC as a always-on service.
+# so this is the lightest way to run Mornye as a always-on service.
 #
 # No registry is bundled by design (see README > Extensions): set
-# SPOTIFLAC_REGISTRIES yourself, either below or in a sibling .env file
+# MORNYE_REGISTRIES yourself, either below or in a sibling .env file
 # compose picks up automatically.
 #
 # Every variable the container understands is listed, with its default, in
 # docs/guide/docker.md ("Environment variables"). This file sets the ones a
 # first run needs; docker-compose.portainer.yml carries the full set.
 services:
-  spotiflac-web:
+  mornye-web:
     # Swap for the published image if you don't want to build locally:
-    # image: ghcr.io/bartolomeorusso9/spotiflac:latest
+    # image: ghcr.io/bartolomeorusso9/mornye-python:latest
     build: .
     command: ["--web", "--host", "0.0.0.0", "--port", "8000"]
     # Who the container runs as. Set PUID/PGID (here, in .env, or in your
@@ -39,29 +39,29 @@ services:
     shm_size: "1gb"
     environment:
       # Comma-separated registry JSON URLs — required, nothing is bundled.
-      SPOTIFLAC_REGISTRIES: "${SPOTIFLAC_REGISTRIES:-}"
+      MORNYE_REGISTRIES: "${MORNYE_REGISTRIES:-${SPOTIFLAC_REGISTRIES:-}}"
       # Optional shared-secret gate for the web GUI (see README > Web Mode).
       # Leave unset only if this port is never reachable from outside a
       # network you fully trust.
-      SPOTIFLAC_WEB_TOKEN: "${SPOTIFLAC_WEB_TOKEN:-}"
+      MORNYE_WEB_TOKEN: "${MORNYE_WEB_TOKEN:-${SPOTIFLAC_WEB_TOKEN:-}}"
       # Where --web saves music, and where the database / extensions /
       # settings live. Both are container paths and must match the right-hand
       # side of a volume below — change the two together. Without the first,
-      # --web saves to ~/Music/SpotiFLAC, which is not mounted here.
-      SPOTIFLAC_DOWNLOAD_DIR: /app/downloads
-      SPOTIFLAC_DATA_DIR: /home/spotiflac/.spotiflac
+      # --web saves to ~/Music/Mornye, which is not mounted here.
+      MORNYE_DOWNLOAD_DIR: "${MORNYE_DOWNLOAD_DIR:-${SPOTIFLAC_DOWNLOAD_DIR:-/app/downloads}}"
+      MORNYE_DATA_DIR: "${MORNYE_DATA_DIR:-${SPOTIFLAC_DATA_DIR:-/home/mornye/.mornye}}"
       # Root-assisted variant only (see `user:` above):
       # PUID: "${PUID:-1000}"
       # PGID: "${PGID:-1000}"
       # Plain lines instead of animated bars, which `docker logs` mangles.
-      SPOTIFLAC_PROGRESS_BARS: "0"
+      MORNYE_PROGRESS_BARS: "${MORNYE_PROGRESS_BARS:-${SPOTIFLAC_PROGRESS_BARS:-0}}"
     volumes:
       # host path : container path. The host side is yours to choose, e.g.
       #   - /mnt/media/music:/app/downloads
       - ./downloads:/app/downloads
       # Database, installed extensions, signed sessions, web users, settings
       # and the cache (in .cache/ inside it) — one directory holds all of it.
-      - ./.spotiflac_docker:/home/spotiflac/.spotiflac
+      - ./.spotiflac_docker:/home/mornye/.mornye
     restart: unless-stopped
     healthcheck:
       # --web is the one run mode this compose file commits to, so (unlike

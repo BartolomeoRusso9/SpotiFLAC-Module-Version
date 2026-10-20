@@ -1,6 +1,6 @@
 """Identifying a local file by sound, and — more importantly — when not to.
 
-The fingerprint path spends a rate limit shared by every SpotiFLAC user (see
+The fingerprint path spends a rate limit shared by every Mornye user (see
 core/acoustid_lookup.py), so "it runs only on the files the cheap path could
 not resolve" is a correctness property, not an optimisation. Half of this
 file is about the requests that must *not* be made.
@@ -16,12 +16,12 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core import acoustid_lookup
-from SpotiFLAC.core.audio_fingerprint import AudioFingerprint
-from SpotiFLAC.core.local_matcher import MatchCandidate
-from SpotiFLAC.core.local_processor import LocalScanEntry, _needs_identifying
-from SpotiFLAC.core.local_scanner import LocalFileInfo
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.core import acoustid_lookup
+from mornye.core.audio_fingerprint import AudioFingerprint
+from mornye.core.local_matcher import MatchCandidate
+from mornye.core.local_processor import LocalScanEntry, _needs_identifying
+from mornye.core.local_scanner import LocalFileInfo
+from mornye.core.models import TrackMetadata
 
 ISRC = "GBAYE0601498"
 ACOUSTID = "9ff43b6a-4f16-427c-93c2-92307ca505e0"
@@ -252,7 +252,7 @@ def test_isrc_is_resolved_by_identity_not_by_the_files_own_text() -> None:
     again answered a file guessed as "01" with a track called "010"; the
     query has to be the ISRC.
     """
-    from SpotiFLAC.core.local_processor import _track_for_isrc
+    from mornye.core.local_processor import _track_for_isrc
 
     track = TrackMetadata(
         id="1" * 22,
@@ -275,7 +275,7 @@ def test_a_duration_that_disagrees_rejects_the_isrc() -> None:
     """An ISRC shared by, or misattributed to, a different cut. Both numbers
     are already in hand, so the check is free.
     """
-    from SpotiFLAC.core.local_processor import _track_for_isrc
+    from mornye.core.local_processor import _track_for_isrc
 
     track = TrackMetadata(
         id="1" * 22,
@@ -294,7 +294,7 @@ def test_a_duration_that_disagrees_rejects_the_isrc() -> None:
 
 
 def test_an_isrc_spotify_does_not_know_yields_nothing() -> None:
-    from SpotiFLAC.core.local_processor import _track_for_isrc
+    from mornye.core.local_processor import _track_for_isrc
 
     assert asyncio.run(_track_for_isrc("ZZZZZ0000000", client=_search_stub([]))) is None
 

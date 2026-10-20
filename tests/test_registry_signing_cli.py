@@ -8,8 +8,8 @@ from __future__ import annotations
 import base64
 import re
 
-from SpotiFLAC.extensions import trust
-from SpotiFLAC.tools import registry_signing_cli
+from mornye.extensions import trust
+from mornye.tools import registry_signing_cli
 
 
 def _run(monkeypatch, capsys, argv) -> tuple[str, int]:
@@ -54,7 +54,7 @@ def test_sign_output_verifies_against_the_matching_public_key(
             "--sha256",
             "deadbeef",
             "--download-url",
-            "https://example.com/tidal-web.spotiflac-ext",
+            "https://example.com/tidal-web.mornye-ext",
         ],
     )
     assert code == 0
@@ -66,7 +66,7 @@ def test_sign_output_verifies_against_the_matching_public_key(
         "tidal-web",
         "1.2.0",
         "deadbeef",
-        "https://example.com/tidal-web.spotiflac-ext",
+        "https://example.com/tidal-web.mornye-ext",
         sig_match.group(1),
     )
     assert signer == "maintainer"

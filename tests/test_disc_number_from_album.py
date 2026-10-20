@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import asyncio
 
-import SpotiFLAC.downloader as downloader_mod
-from SpotiFLAC.core import spotfetch
-from SpotiFLAC.core.models import TrackMetadata
-from SpotiFLAC.core.spotify_protobuf import id_to_gid_hex, parse_album
-from SpotiFLAC.downloader import DownloadOptions, SpotiflacDownloader
+import mornye.downloader as downloader_mod
+from mornye.core import spotfetch
+from mornye.core.models import TrackMetadata
+from mornye.core.spotify_protobuf import id_to_gid_hex, parse_album
+from mornye.downloader import DownloadOptions, MornyeDownloader
 
 # Low base62 IDs, so they round-trip through a 16-byte gid.
 T1 = "0000000000000000000001"
@@ -104,7 +104,7 @@ def _track(track_id: str) -> TrackMetadata:
 
 def test_disc_two_survives_a_cold_track_cache(tmp_path, monkeypatch) -> None:
     """The scenario from review: ISRCs already present, nothing cached."""
-    downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
     web = _AlbumOnlyWebClient()
     monkeypatch.setattr(downloader_mod, "IsrcHelper", _NoIsrcLookup)
     monkeypatch.setattr(spotfetch, "peek_native_track_metadata", lambda _id: None)
@@ -118,7 +118,7 @@ def test_disc_two_survives_a_cold_track_cache(tmp_path, monkeypatch) -> None:
 
 
 def test_a_warm_track_cache_needs_no_album_request(tmp_path, monkeypatch) -> None:
-    downloader = SpotiflacDownloader(DownloadOptions(output_dir=str(tmp_path)))
+    downloader = MornyeDownloader(DownloadOptions(output_dir=str(tmp_path)))
     web = _AlbumOnlyWebClient()
     monkeypatch.setattr(downloader_mod, "IsrcHelper", _NoIsrcLookup)
     monkeypatch.setattr(

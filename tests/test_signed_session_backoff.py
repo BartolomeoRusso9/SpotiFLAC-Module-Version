@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from SpotiFLAC.core import signed_session_mobile as ssm
+from mornye.core import signed_session_mobile as ssm
 
 
 def _client(tmp_path) -> ssm.SignedSessionClient:
@@ -383,7 +383,7 @@ def test_a_timed_out_request_says_so_instead_of_returning_an_empty_error(
 
     cast(Any, client).request = _timeout
 
-    with caplog.at_level("WARNING", logger="SpotiFLAC.core.signed_session_mobile"):
+    with caplog.at_level("WARNING", logger="mornye.core.signed_session_mobile"):
         result = _fetch(client)
 
     assert "ReadTimeout" in result["error"]

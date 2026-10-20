@@ -7,7 +7,7 @@ Reported from a Docker run as a hard crash at the start of a batch:
 
 DownloadManager and DownloadBroadcaster are process-wide singletons, and
 this process genuinely runs two loops — core/loop_runner.py owns a
-long-lived one for the GUI and web sync bridges, while client.SpotiFLAC()
+long-lived one for the GUI and web sync bridges, while client.Mornye()
 keeps its own asyncio.run() for a one-shot batch. An asyncio.Lock binds to
 whichever loop touches it first and refuses every other one.
 """
@@ -18,7 +18,7 @@ import asyncio
 
 import pytest
 
-from SpotiFLAC.core.progress import DownloadBroadcaster, DownloadManager
+from mornye.core.progress import DownloadBroadcaster, DownloadManager
 
 
 @pytest.fixture(autouse=True)
@@ -73,11 +73,11 @@ def test_the_queue_survives_a_long_lived_loop_then_a_batch() -> None:
     """The shape the Docker report actually had.
 
     The GUI and web bridges go through loop_runner's shared loop; the batch
-    that follows brings its own via client.SpotiFLAC()'s asyncio.run().
+    that follows brings its own via client.Mornye()'s asyncio.run().
     """
     manager = DownloadManager()
 
-    from SpotiFLAC.core.loop_runner import run_sync
+    from mornye.core.loop_runner import run_sync
 
     run_sync(_contend(manager, "on-the-shared-loop"))
     asyncio.run(_contend(manager, "on-the-batch-loop"))

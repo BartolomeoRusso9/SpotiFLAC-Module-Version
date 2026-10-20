@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from SpotiFLAC.core.errors import SpotiflacError
-from SpotiFLAC.core.extension_metadata import (
+from mornye.core.errors import MornyeError
+from mornye.core.extension_metadata import (
     SITES,
     ExtensionMetadataClient,
     attach_isrcs,
@@ -31,7 +31,7 @@ from SpotiFLAC.core.extension_metadata import (
     site_for_extension,
     to_track,
 )
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.core.models import TrackMetadata
 
 MELON = next(s for s in SITES if s.key == "melon")
 
@@ -211,7 +211,7 @@ def test_a_handler_pattern_is_matched_as_the_regex_it_is() -> None:
 
 
 def test_a_link_without_its_extension_says_what_is_missing() -> None:
-    with pytest.raises(SpotiflacError) as err:
+    with pytest.raises(MornyeError) as err:
         ExtensionMetadataClient.for_url(
             "https://music.bugs.co.kr/track/1",
             manager=_Manager(_ext("melon-music", ["melon.com"])),
@@ -332,7 +332,7 @@ def test_a_track_link_unwraps_the_track() -> None:
 
 
 def test_an_extension_failure_is_an_error_not_an_empty_album() -> None:
-    with pytest.raises(SpotiflacError):
+    with pytest.raises(MornyeError):
         asyncio.run(
             _client({"getAlbum": None}).get_url_async(
                 "https://www.melon.com/album/detail.htm?albumId=1"
@@ -460,8 +460,8 @@ def test_tracks_that_already_have_an_isrc_cost_no_lookup() -> None:
 
 
 def test_the_tracklist_sends_a_catalogue_link_to_its_extension(monkeypatch) -> None:
-    import SpotiFLAC.core.extension_metadata as module
-    from SpotiFLAC.core.tracklist import metadata_client_for
+    import mornye.core.extension_metadata as module
+    from mornye.core.tracklist import metadata_client_for
 
     monkeypatch.setattr(
         module,
@@ -474,7 +474,7 @@ def test_the_tracklist_sends_a_catalogue_link_to_its_extension(monkeypatch) -> N
 
 
 def test_search_goes_to_the_chosen_source(monkeypatch) -> None:
-    from SpotiFLAC.api_mixins.search import search_metadata_async
+    from mornye.api_mixins.search import search_metadata_async
 
     class _Client:
         async def search_async(self, query, limit=50):
@@ -533,10 +533,10 @@ registerExtension({
 def bridge(tmp_path: Path, monkeypatch):
     if shutil.which("node") is None:
         pytest.skip("needs Node to exercise the real bridge")
-    from SpotiFLAC.extensions.runtime import JSRuntime
+    from mornye.extensions.runtime import JSRuntime
 
     # The local server lives on loopback, which the network guard refuses.
-    monkeypatch.setenv("SPOTIFLAC_EXT_ALLOW_PRIVATE_NETWORK", "1")
+    monkeypatch.setenv("MORNYE_EXT_ALLOW_PRIVATE_NETWORK", "1")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _EchoHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     ext = tmp_path / "index.js"
@@ -577,7 +577,7 @@ def test_a_request_without_a_user_agent_gets_one(bridge) -> None:
 # What the extensions scrape along with the data (seen on the live sites)
 # ---------------------------------------------------------------------------
 
-from SpotiFLAC.core.extension_metadata import clean_album, clean_title  # noqa: E402
+from mornye.core.extension_metadata import clean_album, clean_title  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -813,7 +813,7 @@ def test_one_link_is_one_provider_however_many_calls_it_takes() -> None:
 
 
 def test_no_spotify_client_leaves_the_tracks_as_they_are(monkeypatch) -> None:
-    import SpotiFLAC.core.spotify_metadata as spotify_module
+    import mornye.core.spotify_metadata as spotify_module
 
     class _Unreachable:
         def __init__(self, *args, **kwargs):

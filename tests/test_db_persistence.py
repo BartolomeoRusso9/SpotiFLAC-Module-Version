@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from SpotiFLAC.core import db, download_log
-from SpotiFLAC.core.history import HistoryManager
-from SpotiFLAC.core.job_queue import JobQueue, JobStatus
-from SpotiFLAC.core.models import TrackMetadata
+from mornye.core import db, download_log
+from mornye.core.history import HistoryManager
+from mornye.core.job_queue import JobQueue, JobStatus
+from mornye.core.models import TrackMetadata
 
 
 def _wait_until(predicate, timeout=3.0) -> None:
@@ -204,7 +204,7 @@ def test_download_log_records_and_counts(tmp_path):
 
 
 def test_download_log_hook_reads_result_and_metadata(tmp_path):
-    from SpotiFLAC.core.models import DownloadResult
+    from mornye.core.models import DownloadResult
 
     target = tmp_path / "hooked.flac"
     target.write_bytes(b"y" * 10)
@@ -246,7 +246,7 @@ def _track(isrc: str) -> TrackMetadata:
 
 
 def test_rerunning_a_playlist_does_not_count_a_file_twice(tmp_path):
-    from SpotiFLAC.core.models import DownloadResult
+    from mornye.core.models import DownloadResult
 
     target = tmp_path / "song.m4a"
     target.write_bytes(b"z" * 100)
@@ -264,7 +264,7 @@ def test_rerunning_a_playlist_does_not_count_a_file_twice(tmp_path):
 
 
 def test_first_skip_of_an_unrecorded_file_is_still_learned(tmp_path):
-    from SpotiFLAC.core.models import DownloadResult
+    from mornye.core.models import DownloadResult
 
     # A file that was on disk before the log existed: its first skip is the
     # only chance to learn it, and has_isrc() depends on that.

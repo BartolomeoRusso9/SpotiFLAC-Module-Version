@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SpotiFLAC Module Version — a core, and the sockets you fill</title>
+<title>Mornye Module Version — a core, and the sockets you fill</title>
 <meta name="description" content="A Python module that resolves Spotify metadata and, through extensions you choose and install yourself, retrieves matching audio. No bundled providers, no default source.">
 <meta name="theme-color" content="#0f1115">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='2.4' fill='%237c5cff' transform='rotate(45 12 12)'/%3E%3C/svg%3E">
-<meta property="og:title" content="SpotiFLAC Module Version">
+<meta property="og:title" content="Mornye Module Version">
 <meta property="og:description" content="A Python module that resolves Spotify metadata. No bundled providers, no default source — you supply the extensions.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -212,7 +212,7 @@
 
 <nav>
   <div class="nav-inner">
-    <a class="nav-brand" href="index.html"><span class="dot"></span>SpotiFLAC Module Version</a>
+    <a class="nav-brand" href="index.html"><span class="dot"></span>Mornye Module Version</a>
     <button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
       <span></span><span></span><span></span>
     </button>
@@ -224,7 +224,7 @@
       <li><a href="downloads.html">Downloads</a></li>
       <li><a href="partners.html">Partners</a></li>
       <li class="nav-divider"></li>
-      <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub →</a></li>
+      <li><a class="nav-gh" href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub →</a></li>
     </ul>
   </div>
 </nav>
@@ -233,7 +233,7 @@
 
   <section class="hero">
     <h1>An empty core.<br><span>You supply the modules.</span></h1>
-    <p class="lede">SpotiFLAC resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
+    <p class="lede">Mornye resolves Spotify track, album and playlist metadata. It ships with no bundled provider and no default extension source — every audio backend is a module you find, review, and plug in yourself.</p>
 
     <div class="hero-badges">
       <span class="badge"><span class="bd"></span>Python module</span>
@@ -242,14 +242,14 @@
     </div>
 
     <div class="hero-actions">
-      <a class="btn btn-primary" href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">View on GitHub</a>
       <a class="btn btn-secondary" href="downloads.html">Downloads</a>
     </div>
 
     <div class="install-line">
       <span class="prompt">$</span>
-      <code>pip install SpotiFLAC</code>
-      <button type="button" data-copy="pip install SpotiFLAC">copy</button>
+      <code>pip install Mornye</code>
+      <button type="button" data-copy="pip install Mornye">copy</button>
     </div>
 
     <div class="hero-visual">
@@ -302,7 +302,7 @@
         <div class="flow-card you">
           <div class="num">02</div>
           <h3>Point at a registry</h3>
-          <p>Set <code class="mono">SPOTIFLAC_REGISTRIES</code>, or add one from Settings if you're using the GUI/web interface, to a source of extensions you've chosen. Nothing is fetched until you do.</p>
+          <p>Set <code class="mono">MORNYE_REGISTRIES</code>, or add one from Settings if you're using the GUI/web interface, to a source of extensions you've chosen. Nothing is fetched until you do.</p>
         </div>
         <div class="flow-card">
           <div class="num">03</div>
@@ -319,7 +319,7 @@
       <h2 class="section-title">What the core actually does</h2>
       <p class="section-sub">&nbsp;</p>
       <div class="features-grid">
-        <div class="feature-card"><div class="feature-icon">API</div><h3>Sync &amp; async Python</h3><p>A blocking <code class="mono">SpotiFLAC()</code> call for scripts, or <code class="mono">AsyncSpotiFLAC</code> for bots and web backends.</p></div>
+        <div class="feature-card"><div class="feature-icon">API</div><h3>Sync &amp; async Python</h3><p>A blocking <code class="mono">Mornye()</code> call for scripts, or <code class="mono">AsyncMornye</code> for bots and web backends.</p></div>
         <div class="feature-card"><div class="feature-icon">＋</div><h3>JS or Python extensions</h3><p>Bring your own registry. Nothing bundled, nothing installed automatically, ever.</p></div>
         <div class="feature-card"><div class="feature-icon">◧</div><h3>CLI, GUI, web, terminal</h3><p><code class="mono">--gui</code> for a native window, <code class="mono">--web</code> for the same interface in a browser, <code class="mono">--tui</code> for a guided terminal UI.</p></div>
         <div class="feature-card"><div class="feature-icon">♫</div><h3>MusicBrainz enrichment</h3><p>Genre, label, BPM, UPC and ISRC tags added automatically when a match is found.</p></div>
@@ -346,20 +346,20 @@
       </div>
       <div class="tab-panels">
         <div class="tab-panel active" data-panel="cli"><pre><span class="c"># install</span>
-pip install SpotiFLAC
+pip install Mornye
 
 <span class="c"># point at a registry you've chosen, then install an extension</span>
-<span class="k">export</span> SPOTIFLAC_REGISTRIES=<span class="s">"https://example.com/my-registry.json"</span>
+<span class="k">export</span> MORNYE_REGISTRIES=<span class="s">"https://example.com/my-registry.json"</span>
 
 <span class="c"># resolve + download using an installed extension</span>
-spotiflac https://open.spotify.com/track/TRACK_ID ./downloads --service ext:tidal-web</pre></div>
+mornye https://open.spotify.com/track/TRACK_ID ./downloads --service ext:tidal-web</pre></div>
         <div class="tab-panel" data-panel="gui"><pre><span class="c"># native window</span>
-spotiflac --gui</pre></div>
+mornye --gui</pre></div>
         <div class="tab-panel" data-panel="web"><pre><span class="c"># same interface, served locally — open http://127.0.0.1:8000</span>
-spotiflac --web</pre></div>
-        <div class="tab-panel" data-panel="py"><pre><span class="k">from</span> SpotiFLAC <span class="k">import</span> SpotiFLAC
+mornye --web</pre></div>
+        <div class="tab-panel" data-panel="py"><pre><span class="k">from</span> Mornye <span class="k">import</span> Mornye
 
-SpotiFLAC(
+Mornye(
     url=<span class="s">"https://open.spotify.com/track/TRACK_ID"</span>,
     output_dir=<span class="s">"./downloads"</span>,
     services=[<span class="s">"ext:tidal-web"</span>],  <span class="c"># requires the extension to be installed</span>
@@ -370,7 +370,7 @@ SpotiFLAC(
         <div class="icon">＋</div>
         <div>
           <h4>About that <code>ext:tidal-web</code></h4>
-          <p>It only resolves to something if you've installed an extension by that name, from a registry you configured. The maintainer doesn't ship, curate, or default to one — see <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#extensions" target="_blank" rel="noopener">Extensions</a> in the README for the full mechanism.</p>
+          <p>It only resolves to something if you've installed an extension by that name, from a registry you configured. The maintainer doesn't ship, curate, or default to one — see <a href="https://github.com/BartolomeoRusso9/Mornye-Python#extensions" target="_blank" rel="noopener">Extensions</a> in the README for the full mechanism.</p>
         </div>
       </div>
     </div>
@@ -384,11 +384,11 @@ SpotiFLAC(
       <div class="faq-list">
         <details class="faq-item">
           <summary>Why doesn't anything download right after I install it?</summary>
-          <div class="faq-answer">By design. The core resolves Spotify metadata only — it has no built-in provider and no default extension source. You need to point <code class="mono">SPOTIFLAC_REGISTRIES</code> at a registry of your choosing and install at least one extension before it can retrieve audio.</div>
+          <div class="faq-answer">By design. The core resolves Spotify metadata only — it has no built-in provider and no default extension source. You need to point <code class="mono">MORNYE_REGISTRIES</code> at a registry of your choosing and install at least one extension before it can retrieve audio.</div>
         </details>
         <details class="faq-item">
           <summary>Can I write my own extension?</summary>
-          <div class="faq-answer">Yes — JavaScript and Python are both supported. <code class="mono">spotiflac --ext-scaffold NAME</code> generates a working starting point for either, and <code class="mono">spotiflac --ext-dry-run PATH</code> validates it (manifest, entry point, exposes the right shape) without installing it or contacting any registry. For Python there's a full walkthrough — the <code class="mono">BaseProvider</code> contract, the <code class="mono">core</code> toolbox, a complete example provider, packaging and publishing: see <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/docs/guide/python-extensions.md" target="_blank" rel="noopener">Writing a Python Extension</a>.</div>
+          <div class="faq-answer">Yes — JavaScript and Python are both supported. <code class="mono">mornye --ext-scaffold NAME</code> generates a working starting point for either, and <code class="mono">mornye --ext-dry-run PATH</code> validates it (manifest, entry point, exposes the right shape) without installing it or contacting any registry. For Python there's a full walkthrough — the <code class="mono">BaseProvider</code> contract, the <code class="mono">core</code> toolbox, a complete example provider, packaging and publishing: see <a href="https://github.com/BartolomeoRusso9/Mornye-Python/blob/main/docs/guide/python-extensions.md" target="_blank" rel="noopener">Writing a Python Extension</a>.</div>
         </details>
         <details class="faq-item">
           <summary>GUI or web mode — which should I use?</summary>
@@ -400,7 +400,7 @@ SpotiFLAC(
         </details>
         <details class="faq-item">
           <summary>Is this legal to use?</summary>
-          <div class="faq-answer">SpotiFLAC's core doesn't host, store, or distribute copyrighted content — it resolves metadata. What happens when you install and use a third-party extension is between you and the terms of service of whatever platform that extension talks to. See the <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#disclaimer" target="_blank" rel="noopener">full disclaimer</a> for specifics; this isn't legal advice.</div>
+          <div class="faq-answer">Mornye's core doesn't host, store, or distribute copyrighted content — it resolves metadata. What happens when you install and use a third-party extension is between you and the terms of service of whatever platform that extension talks to. See the <a href="https://github.com/BartolomeoRusso9/Mornye-Python#disclaimer" target="_blank" rel="noopener">full disclaimer</a> for specifics; this isn't legal advice.</div>
         </details>
       </div>
     </div>
@@ -410,13 +410,13 @@ SpotiFLAC(
     <div class="section-inner">
       <div class="disclaimer">
         <h2>Disclaimer</h2>
-        <p>This project is intended for educational and personal use only. SpotiFLAC Module Version is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.</p>
+        <p>This project is intended for educational and personal use only. Mornye Module Version is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service.</p>
         <ul>
           <li>No copyrighted content is hosted, stored, mirrored, or distributed by this project. The core does not bundle, ship, or default to any third-party extension, registry, or provider.</li>
           <li>You are responsible for ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws and the terms of service of any platform you access.</li>
           <li>The maintainer does not review, endorse, or take responsibility for the content or behavior of third-party extensions or registries a user may choose to install.</li>
         </ul>
-        <div class="more">Full disclaimer, license and details → <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version#disclaimer" target="_blank" rel="noopener">github.com/BartolomeoRusso9/SpotiFLAC-Module-Version</a></div>
+        <div class="more">Full disclaimer, license and details → <a href="https://github.com/BartolomeoRusso9/Mornye-Python#disclaimer" target="_blank" rel="noopener">github.com/BartolomeoRusso9/Mornye-Python</a></div>
       </div>
     </div>
   </section>
@@ -426,14 +426,14 @@ SpotiFLAC(
 <footer>
   <div class="footer-inner">
     <div class="footer-links">
-      <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://pypi.org/project/SpotiFLAC/" target="_blank" rel="noopener">PyPI</a>
-      <a href="https://t.me/SpotiFLAC_Module_Version" target="_blank" rel="noopener">Telegram</a>
+      <a href="https://github.com/BartolomeoRusso9/Mornye-Python" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://pypi.org/project/mornye/" target="_blank" rel="noopener">PyPI</a>
+      <a href="https://t.me/Mornye_Module_Version" target="_blank" rel="noopener">Telegram</a>
       <a href="https://ko-fi.com/bartolomeorusso9" target="_blank" rel="noopener">Ko-fi</a>
       <a href="downloads.html">Downloads</a>
       <a href="partners.html">Partners</a>
-      <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
-      <a href="https://github.com/BartolomeoRusso9/SpotiFLAC-Module-Version/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/BartolomeoRusso9/Mornye-Python/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+      <a href="https://github.com/BartolomeoRusso9/Mornye-Python/issues" target="_blank" rel="noopener">Issues</a>
     </div>
     <div class="footer-copy">MIT Licensed · not affiliated with any streaming service</div>
   </div>
