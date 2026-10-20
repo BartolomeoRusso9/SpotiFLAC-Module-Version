@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: mornye
-Version: 1.0.2
+Version: 1.0.3
 Summary: A Python module for metadata and user-configured music-provider extensions.
 Author: Mornye
 License: MIT
@@ -13,17 +13,16 @@ Classifier: Intended Audience :: End Users/Desktop
 Classifier: Intended Audience :: Developers
 Classifier: Topic :: Multimedia :: Sound/Audio
 Classifier: Operating System :: OS Independent
-Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
 Classifier: Programming Language :: Python :: 3.13
 Classifier: Programming Language :: Python :: 3.14
-Requires-Python: >=3.10
+Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: httpx[http2]>=0.27.0
 Requires-Dist: mutagen>=1.47.0
-Requires-Dist: Pillow>=12.3.0
+Requires-Dist: Pillow>=13.0.0
 Requires-Dist: pydantic>=2.7.0
 Requires-Dist: cryptography>=50.0.0
 Requires-Dist: pycryptodome>=3.20.0

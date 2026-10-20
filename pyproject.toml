@@ -7,13 +7,10 @@ name = "mornye"
 version = "1.0.3"
 description = "A Python module for metadata and user-configured music-provider extensions."
 readme = "README.md"
-# 3.10, not 3.9: core/models.py declares PEP 604 unions (`str | None`) on
-# pydantic BaseModels under `from __future__ import annotations`, and pydantic
-# resolves those annotations at runtime — on 3.9 that raises unless the
-# optional eval-type-backport package is installed, so `import mornye`
-# fails outright. 3.10 is also what the classifiers, black, mypy and the CI
-# matrix have always targeted; only this line said otherwise.
-requires-python = ">=3.10"
+# 3.11 is the floor because Pillow 13+ now requires it. This aligns the
+# package metadata, the formatter/mypy target, and the CI matrix with the
+# currently supported interpreter range.
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     { name = "Mornye" }
@@ -31,7 +28,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Multimedia :: Sound/Audio",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -135,7 +131,7 @@ smb = [
 
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py311"]
 
 [tool.ruff]
 line-length = 88
@@ -161,7 +157,7 @@ select = ["E4", "E7", "E9", "F"]
 "tests/test_launcher_web_flags.py" = ["E402"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 explicit_package_bases = true
 ignore_missing_imports = true
 # Baseline as of 2026-08: ~177 pre-existing errors across the codebase (most
