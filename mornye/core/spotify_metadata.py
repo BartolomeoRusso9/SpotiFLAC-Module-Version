@@ -448,7 +448,6 @@ def resolve_short_link(uri: str) -> str:
         logger.debug("[spotify] short link %s could not be resolved: %s", uri, exc)
     return ""
 
-
 def _checked_id(uri: str, raw_id: str) -> str:
     """A Spotify id is exactly 22 base-62 characters.
 
@@ -668,7 +667,7 @@ class SpotifyMetadataClient:
             # dead id from a track. A union WITHOUT a `__typename` is left
             # to the legacy guards underneath: the field record predates the
             # field and old test doubles omit it.
-            raise SpotiflacError(
+            raise MornyeError(
                 ErrorKind.TRACK_NOT_FOUND,
                 f"Spotify reports track {track_id} as {typename}.",
             )
