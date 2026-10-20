@@ -16,14 +16,14 @@ def test_environment_values_use_the_configured_name(monkeypatch):
 
 
 def test_data_directory_uses_the_current_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(paths.Path, "home", classmethod(lambda _cls: tmp_path))
     monkeypatch.delenv("MORNYE_DATA_DIR", raising=False)
 
     assert paths.data_dir() == tmp_path / ".mornye"
 
 
 def test_download_directory_uses_the_current_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(paths.Path, "home", classmethod(lambda _cls: tmp_path))
     monkeypatch.delenv("MORNYE_DOWNLOAD_DIR", raising=False)
 
     assert Path(paths.default_download_dir()) == tmp_path / "Music" / "Mornye"

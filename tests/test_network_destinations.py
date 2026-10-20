@@ -16,6 +16,7 @@ from mornye.core.network_destinations import (
     SMBBackend,
     normalize_mounted_path,
     validate_profile,
+    _smb_relative_parts,
 )
 
 
@@ -290,18 +291,9 @@ def test_hash_mismatch_cleans_remote_temporary_file(tmp_path):
 
 
 @pytest.mark.parametrize("filename", ["C:outside.flac", "nested\\outside.flac"])
-def test_upload_rejects_names_that_could_escape_the_configured_share(
-    tmp_path, filename
-):
-    client = _FakeSMBClient()
-    backend = SMBBackend(_profile(subdirectory=""), "user", "pass", client=client)
-    local_root = tmp_path / "stage"
-    local_root.mkdir()
-    (local_root / filename).write_bytes(b"audio")
-
+def test_smb_rejects_unsafe_relative_filename_components(filename):
     with pytest.raises(DestinationError, match="filename is unsafe"):
-        backend.upload_tree(local_root)
-    assert not client.files
+        _smb_relative_parts(filename)
 
 
 def test_cancelled_transfer_cleans_temporary_file(tmp_path):

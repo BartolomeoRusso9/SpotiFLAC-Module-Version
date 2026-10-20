@@ -44,6 +44,18 @@ class DestinationError(RuntimeError):
     """A safe, actionable destination error that contains no credentials."""
 
 
+def _smb_relative_parts(relative: str) -> tuple[str, ...]:
+    components = PurePosixPath(relative).parts
+    if not components or any(
+        component in {"", ".", ".."}
+        or any(character in component for character in "/\\:")
+        or any(ord(character) < 32 for character in component)
+        for component in components
+    ):
+        raise DestinationError("A staged filename is unsafe for SMB delivery.")
+    return components
+
+
 @dataclass(frozen=True)
 class SMBProfile:
     id: str
@@ -468,17 +480,12 @@ class SMBBackend:
                     "SMB delivery was cancelled. Staged local files were retained."
                 )
             relative = local_path.relative_to(local_root).as_posix()
-            components = PurePosixPath(relative).parts
-            if any(
-                component in {"", ".", ".."}
-                or any(character in component for character in "/\\:")
-                or any(ord(character) < 32 for character in component)
-                for component in components
-            ):
-                raise DestinationError("A staged filename is unsafe for SMB delivery.")
-            remote_dir = ntpath.join(self.root, *PurePosixPath(relative).parent.parts)
-            if PurePosixPath(relative).parent == PurePosixPath("."):
-                remote_dir = self.root
+            components = _smb_relative_parts(relative)
+            remote_dir = (
+                ntpath.join(self.root, *components[:-1])
+                if len(components) > 1
+                else self.root
+            )
             try:
                 self._remote_call(lambda: client.makedirs(remote_dir, exist_ok=True))
                 remote_path = self._upload_one(
