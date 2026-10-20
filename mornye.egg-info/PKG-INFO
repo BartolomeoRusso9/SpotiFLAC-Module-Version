@@ -1,0 +1,199 @@
+Metadata-Version: 2.4
+Name: mornye
+Version: 1.0.1
+Summary: A Python module for metadata and user-configured music-provider extensions.
+Author:  BartolomeoRusso9
+License: MIT
+Project-URL: Homepage, https://github.com/mornyeapp/Mornye-Python
+Project-URL: Repository, https://github.com/mornyeapp/Mornye-Python
+Project-URL: Bug Tracker, https://github.com/mornyeapp/Mornye-Python/issues
+Keywords: spotify,flac,downloader,music,lossless,lossless-music,tidal,qobuz,amazon-music,audio,mornye,spotify-metadata,no-account,hi-res
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Multimedia :: Sound/Audio
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: httpx[http2]>=0.27.0
+Requires-Dist: mutagen>=1.47.0
+Requires-Dist: Pillow>=12.3.0
+Requires-Dist: pydantic>=2.7.0
+Requires-Dist: cryptography>=50.0.0
+Requires-Dist: pycryptodome>=3.20.0
+Requires-Dist: packaging>=23.0
+Requires-Dist: yt-dlp>=2026.7.4
+Requires-Dist: tqdm>=4.66.3
+Requires-Dist: pywebview>=5.0.0
+Requires-Dist: textual>=1.0
+Requires-Dist: aiofiles>=23.2.1
+Requires-Dist: tenacity>=8.3.0
+Requires-Dist: python-dotenv>=1.2.2
+Requires-Dist: requests>=2.33.0
+Requires-Dist: pydoll-python>=2.19.0
+Requires-Dist: multidict>=6.9.1
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: soundfile>=0.12.1
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn[standard]>=0.29.0
+Requires-Dist: pyacoustid>=1.3.0
+Provides-Extra: dev
+Requires-Dist: pytest>=9.0.3; extra == "dev"
+Requires-Dist: pytest-httpx>=0.21; extra == "dev"
+Requires-Dist: httpx>=0.27; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: ruff>=0.12.0; extra == "dev"
+Requires-Dist: black>=26.3.1; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: pre-commit>=3.0; extra == "dev"
+Provides-Extra: smb
+Requires-Dist: smbprotocol>=1.15.0; extra == "smb"
+Requires-Dist: keyring>=25.0.0; extra == "smb"
+Dynamic: license-file
+
+# Mornye Python
+
+Fetch track metadata and retrieve matching lossless audio through Tidal, Qobuz, Amazon Music and other provider backends — supplied entirely via extensions you choose and configure yourself. Integrate directly into your Python projects, build custom Telegram bots, automation tools, or bulk downloaders.
+
+[![GitHub stars](https://img.shields.io/github/stars/mornyeapp/Mornye-Python?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/mornyeapp/Mornye-Python/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/mornyeapp/Mornye-Python?color=8b5cf6&labelColor=black&logo=github&label=Latest%20Release)](https://github.com/mornyeapp/Mornye-Python/releases/latest)
+[![PyPI version](https://img.shields.io/pypi/v/mornye?logo=pypi&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/mornye/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mornye?logo=python&logoColor=ffffff&labelColor=000000&color=7b97ed)](https://pypi.org/project/mornye/)
+[![GitHub downloads](https://img.shields.io/github/downloads/mornyeapp/Mornye-Python/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/mornyeapp/Mornye-Python/releases)
+[![PyPI downloads](https://img.shields.io/pepy/dt/mornye?logo=pypi&logoColor=ffffff&labelColor=000000)](https://pypi.org/project/mornye/)
+[![Telegram community](https://img.shields.io/badge/Telegram%20Community-369eff?labelColor=black&logo=telegram&logoColor=white)](https://t.me/mornyecommunity)
+
+## Disclaimer
+
+This project is intended for **educational and personal use only**. The developer does not condone or encourage copyright infringement. The software is licensed under the [MIT License](https://github.com/mornyeapp/Mornye-Python//blob/main/LICENSE).
+
+**Mornye-Python** is an independent, third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. It is also not affiliated with, and has no control over or responsibility for, any other project sharing a similar name on other platforms.
+
+No copyrighted content is hosted, stored, mirrored, or distributed by this repository. The core application does not bundle, ship, or default to any third-party extension, registry, or provider. Extensions are installed only if a user explicitly configures and requests them from a source of their own choosing; the maintainer has no control over, does not review, and assumes no responsibility for the content or behavior of third-party extensions or registries a user may choose to install.
+
+You are solely responsible for:
+
+1. Ensuring your use of this software, and any extension or registry you choose to install, complies with your local laws.
+2. Reading and adhering to the Terms of Service of any platform or provider you access, directly or through an extension.
+3. Any legal consequences resulting from the use or misuse of this tool.
+
+This software is provided free of charge by the maintainer. If you paid a third party for access to it, you may have been misled or scammed.
+
+The software is provided "as is", without warranty of any kind, express or implied. The author assumes no liability for any bans, damages, or legal issues arising from its use or misuse. Users assume all risk associated with its use.
+
+If you are a copyright holder or an authorized representative and believe this repository infringes upon your rights, please contact the maintainer with sufficient detail (including relevant URLs and proof of ownership); the matter will be promptly investigated.
+
+---
+
+> **Looking for a standalone app?**
+>
+> - [Mornye (Mobile)](https://github.com/mornyeapp/Mornye) — Mornye for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
+---
+
+## Why Python (instead of the standalone app)
+
+The Mobile app is built for direct, immediate use: open it, paste a link, download. Python exists for a different case — **integrating** this logic into something else.
+
+It makes sense to start here if:
+
+- **You're building a bot** (Telegram, Discord) or a service that needs to handle requests from many users automatically, not a single manual download.
+- **You need the async API** (`AsyncMornye`) inside an existing FastAPI/Quart/Sanic app, with shared connection pooling.
+- **You want to orchestrate bulk downloads** via scripts — multiple playlists, full discographies, local library retagging — with custom logic (filenames via a Python function, post-download actions, saved profiles).
+- **You need to run headless**, on a server, a NAS, or inside Docker, possibly as part of a larger pipeline.
+- **You want full control over which extensions get loaded** and from which registry, instead of relying on a fixed set baked into an app.
+
+If you just want a GUI for personal use, with no code involved, the [Mobile](https://github.com/mornyeapp/Mornye) app remain the simpler choice — this module is the building block those (and similar projects) can be built on top of.
+
+---
+
+## Features
+
+- Native synchronous and asynchronous Python APIs
+- Modular JavaScript and Python Extension system (bring-your-own registry — nothing bundled)
+- Automatic fallback among the extensions *you* have installed
+- Built-in GUI, as a native window or served locally in a browser (`--gui` / `--web`)
+- Guided terminal UI (`--tui`), with the download queue live on screen
+- Docker support
+- Configuration Profiles
+- MusicBrainz metadata enrichment
+- Synchronized lyrics — embedded in the tag and, optionally, written out as `.lrc` files; word-by-word where the source has it, or line-synced if you prefer
+- Optional Canvas sidecars — the short looping visual a track carries, saved next to it as a video file (off by default; no media server reads these on its own)
+- Optional MP3 320 kbps transcoding
+- Watch mode: re-sync a playlist/album/artist/URL on an interval, indefinitely
+- Optional shared-secret or per-account authentication for `--web`, plus a queued, per-user download history in multi-user mode
+- Extension discovery directories, and optional Ed25519 signature verification on top of registry checksums
+- Local-library duplicate detection by acoustic fingerprint, independent of tags/ISRC
+- Extension scaffolding + dry-run validation for developing your own
+- Installable as a PWA in `--web` mode (Add to Home Screen / standalone window)
+- **Follow artists** — check for new releases and fetch only what came out since
+- **Library upgrade** — find files below a target quality (including fake Hi-Res) and re-fetch them
+- **Outbound notifications** — webhook, Discord, Telegram or ntfy, per track or one summary per run
+- **Versioned REST API** at `/api/v1`, with an OpenAPI document at `/docs`
+- **CSV input** — hand it a playlist export (Exportify, Soundiiz, a bare list of links) and it downloads what the file lists, matching rows that carry no link and reporting the ones it cannot
+- **Dashboard** — what you have actually downloaded, as numbers: top artists, genres, decades, providers, listening time, activity by weekday and streaks (`--stats`, or the Stats screen)
+- **Durable queue and download log** (SQLite): a restart no longer loses queued work
+- **SMB destinations** — use an OS-mounted share or the optional SMB2/SMB3 backend, with staged and verified remote delivery
+- **Per-account quotas and an admin role** in `--web-multiuser`
+- **Extension health panel** — success rate, latency and last error per provider
+- **Wrong-recording guard** — a provider that answers with a karaoke take, a clean edit of an explicit track, or another artist's cover is rejected and the download falls through to the next one, instead of producing a file that carries the right tags and the wrong audio
+
+---
+
+## Installation
+
+```bash
+pip install mornye
+```
+
+> **Important:** out of the box, Mornye does nothing but resolve metadata — it ships with **no built-in provider and no default extension source**. Before you can download anything, you need to point it at an extension registry of your own choosing and install at least one extension. See [Extensions](docs/guide/extensions.md#extensions) below.
+---
+
+## Documentation
+
+The full guide lives in [`docs/guide/`](docs/guide/) — the README had grown
+to 76 KB and 87 headings, which is past the point where GitHub or PyPI
+renders it usefully. Every page below is the same text that used to be here.
+
+| Page | What's in it |
+| --- | --- |
+| [Quick Start](docs/guide/quick-start.md) | Every way to run it — GUI, web, CLI, terminal UI, Python — and the URL types it accepts |
+| [Terminal UI](docs/guide/tui.md) | `--tui`, the guided mode: every setting on one screen, and the download queue live |
+| [Extensions](docs/guide/extensions.md) | Registries, installing providers, signature verification and trust tiers |
+| [Downloading from a CSV](docs/guide/csv.md) | Feeding it a file of tracks instead of a link: supported exports, how rows without a link are matched, and the unmatched-row report |
+| [Your library in numbers](docs/guide/dashboard.md) | The dashboard built from what you have actually downloaded — top artists, genres, decades, activity |
+| [Configuration](docs/guide/configuration.md) | Every option: naming, quality, lyrics, enrichment, transcoding, watch mode, profiles |
+| [Network Destinations](docs/guide/network-destinations.md) | Mounted paths, native SMB profiles, safe transfers, CLI and Docker |
+| [API Reference](docs/guide/api-reference.md) | `Mornye` and `AsyncMornye`, and the objects they return |
+| [Migration Guide](docs/guide/migration.md) | Moving from the old distribution, CLI, environment, and local state |
+| [Local Tagging](docs/guide/local-tagging.md) | Retagging an existing library, MusicBrainz enrichment, download validation |
+| [Automation & Operations](docs/guide/automation.md) | JSON output, post-download hooks, notifications, M3U, library rescan, cache maintenance, running the web server |
+| [Following Artists](docs/guide/subscriptions.md) | Subscriptions, new-release checks, scheduled playlist monitoring, and the library-upgrade pass |
+| [REST API](docs/guide/rest-api.md) | The versioned `/api/v1` surface, quotas and the admin endpoints |
+| [Docker](docs/guide/docker.md) | Headless and NAS setups |
+| [CLI](docs/guide/cli.md) | The standalone executables |
+
+Security policy and the reporting process: [SECURITY.md](SECURITY.md).
+
+---
+
+## Want to support the project?
+
+If this software is useful and brings you value, consider supporting the project by buying us a coffee. Your support helps keep development going.
+
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/bartolomeorusso9)
+
+---
+
+## API Credits
+
+[MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Musixmatch](https://www.musixmatch.com) · [iTunes Search API](https://itunes.apple.com)
+
+> Provider-specific credits (Tidal, Qobuz, Amazon Music, Deezer, SoundCloud, Apple Music, Pandora, and any third-party API used to reach them) now belong to whichever extension you install — see that extension's own documentation for its credits and terms.
+>
+> **[!TIP]** Star the repo to show support, and click **Watch → Custom → Releases** on GitHub if you want to be notified as soon as a new release goes out.
