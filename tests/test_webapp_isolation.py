@@ -302,10 +302,16 @@ def test_the_folder_browser_cannot_leave_the_callers_own_root() -> None:
     """
     app = webapp.create_app(multiuser=True)
     alice = _login(app, "alice", "alice-password")
+    alice_dir = app.state.api_registry.get("alice").download_dir
     bob_dir = app.state.api_registry.get("bob").download_dir
 
     denied = alice.get("/api/browse-folder", params={"path": bob_dir})
     assert denied.status_code == 403
+    traversed = alice.get(
+        "/api/browse-folder",
+        params={"path": str(Path(alice_dir).parent / Path(bob_dir).name)},
+    )
+    assert traversed.status_code == 403
 
     assert (
         alice.get("/api/browse-folder", params={"path": str(Path.home())}).status_code

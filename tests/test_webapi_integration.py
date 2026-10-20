@@ -170,7 +170,20 @@ def test_the_last_admin_cannot_be_demoted_over_http():
             "/api/admin/role", json={"username": "root", "role": "user"}
         )
         assert response.status_code == 400
-        assert "only admin" in response.json()["error"]
+        assert response.json() == {"error": "Unable to update role"}
+
+
+def test_invalid_role_is_not_reflected_in_error_response():
+    web_users.create_user("root", "pw", role="admin")
+    with TestClient(create_app(multiuser=True)) as client:
+        _login(client, "root")
+        response = client.post(
+            "/api/admin/role",
+            json={"username": "root", "role": "sensitive-role-value"},
+        )
+        assert response.status_code == 400
+        assert response.json() == {"error": "Unable to update role"}
+        assert "sensitive-role-value" not in response.text
 
 
 def test_metrics_are_admin_only_in_multiuser_mode():

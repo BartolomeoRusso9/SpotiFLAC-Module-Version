@@ -102,36 +102,6 @@ def _token_matches(candidate: str | None, expected: str) -> bool:
     return secrets.compare_digest(candidate, expected)
 
 
-def _is_path_safe(candidate: Path, api, allow_home: bool = True) -> bool:
-    """Check if candidate path is within approved roots.
-
-    Returns True if the resolved canonical path is a descendant of (or equal to)
-    at least one approved root. Returns False otherwise (path traversal attempt).
-
-    `allow_home=False` drops the home directory from the approved roots,
-    leaving only this caller's own download_dir. That is what multi-user mode
-    needs: with home approved, any account could browse to the shared
-    download root and read every other account's folder name — and anything
-    else under $HOME besides. Single-user mode keeps home, because there the
-    "other account" is the same person.
-    """
-    try:
-        resolved = os.path.realpath(str(candidate))
-        approved_roots = [os.path.realpath(str(api.download_dir))]
-        if allow_home:
-            approved_roots.append(os.path.realpath(str(Path.home())))
-        for root in approved_roots:
-            try:
-                if os.path.commonpath([resolved, root]) == root:
-                    return True
-            except ValueError:
-                # Different drives / mixed absolute-relative — not under root.
-                continue
-        return False
-    except Exception:
-        return False
-
-
 # Methods safe to expose directly over HTTP. This is an explicit allowlist —
 # window-chrome methods (minimize/maximize/resize/move/destroy, which only
 # make sense for a native pywebview window) are intentionally excluded; the
@@ -869,11 +839,8 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
                     str(payload.get("username", "")),
                     str(payload.get("role", "")),
                 )
-            except WebUserError as exc:
-                # This one *is* safe to surface: every WebUserError raised by
-                # set_role is a message written for the operator ("unknown
-                # role", "that is the only admin"), with no internals in it.
-                return JSONResponse({"error": str(exc)}, status_code=400)
+            except WebUserError:
+                return JSONResponse({"error": "Unable to update role"}, status_code=400)
             if not updated:
                 return JSONResponse({"error": "No such user"}, status_code=404)
             return JSONResponse({"ok": True})
@@ -1068,16 +1035,18 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
             # confirm it sits under an approved root *before* it is ever used
             # to touch the filesystem. Everything downstream operates on the
             # sanitized `safe_root` string, never on the raw `path` input.
-            requested = os.path.realpath(os.path.expanduser(path) if path else root)
-            if not _is_path_safe(Path(requested), target_api, allow_home=not multiuser):
+            base = (Path(path).expanduser() if path else Path(root)).resolve()
+            approved_roots = [Path(target_api.download_dir).resolve()]
+            if not multiuser:
+                approved_roots.append(Path.home().resolve())
+            if not any(base.is_relative_to(approved_root) for approved_root in approved_roots):
                 return JSONResponse(
                     {"error": "Access denied: path is outside approved directories"},
                     status_code=403,
                     headers=_private_headers,
                 )
-            base = Path(requested)
             if not base.is_dir():
-                base = Path(os.path.realpath(root))
+                base = Path(root).resolve()
             directories = sorted(
                 (
                     p.name
