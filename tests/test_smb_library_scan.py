@@ -138,6 +138,10 @@ def test_scan_builds_stats_report_without_touching_download_log(monkeypatch) -> 
     assert report["top_artists"] == [
         {"name": "Queen", "tracks": 2, "share": 1.0},
     ]
+    assert report["top_tracks"] == [
+        {"name": "First", "artist": "Queen", "tracks": 1},
+        {"name": "Second", "artist": "Queen", "tracks": 1},
+    ]
     assert report["top_genres"]["entries"][0]["name"] == "Rock"
     assert report["decades"]["entries"][0]["name"] == "1970s"
     assert {entry["name"] for entry in report["formats"]} == {"flac", "m4a"}

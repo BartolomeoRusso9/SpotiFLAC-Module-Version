@@ -6981,11 +6981,13 @@ function renderStats(doc) {
   }
 
   const repeats = doc.top_tracks || [];
-  if (!isSmbScan && repeats.length) {
+  if (repeats.length) {
     sections.push(statsSection(
-      'Fetched more than once',
+      isSmbScan ? 'Top tracks' : 'Fetched more than once',
       statsBars(repeats.map((e) => ({ label: `${e.name} — ${e.artist}`, value: e.tracks }))),
-      'A re-download after a quality upgrade, or the same song from two playlists.',
+      isSmbScan
+        ? 'Most common track names and artists discovered in the SMB library scan.'
+        : 'A re-download after a quality upgrade, or the same song from two playlists.',
     ));
   }
 

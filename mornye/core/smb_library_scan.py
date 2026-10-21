@@ -67,6 +67,7 @@ def _build_stats(
     tracks = len(records)
     artists: Counter = Counter()
     albums: Counter = Counter()
+    track_names: Counter = Counter()
     genres: Counter = Counter()
     decades: Counter = Counter()
     formats: Counter = Counter()
@@ -77,9 +78,12 @@ def _build_stats(
         artist_names = _split_names(record["artist"])
         for artist in artist_names:
             artists[artist] += 1
+        title = str(record.get("title") or "Unknown track").strip() or "Unknown track"
+        artist_name = artist_names[0] if artist_names else "Unknown artist"
+        track_names[(title, artist_name)] += 1
         album = record["album"]
         if album and album.lower() != "unknown":
-            albums[(album, artist_names[0] if artist_names else "")] += 1
+            albums[(album, artist_name)] += 1
         row_genres = _split_names(record["genre"])
         if row_genres:
             genre_known += 1
@@ -122,12 +126,15 @@ def _build_stats(
             }
             for (name, artist), count in albums.most_common(10)
         ],
+        "top_tracks": [
+            {"name": name, "artist": artist, "tracks": count}
+            for (name, artist), count in track_names.most_common(10)
+        ],
         "top_genres": {
             "known": genre_known,
             "unknown": tracks - genre_known,
             "entries": _ranked(genres, genre_known, 10),
         },
-        "top_tracks": [],
         "providers": [],
         "formats": _ranked(formats, tracks, 10),
         "decades": {

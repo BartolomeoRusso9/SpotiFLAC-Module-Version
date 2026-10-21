@@ -262,6 +262,11 @@ class LibraryPanel(VerticalScroll):
     def _format_report(report: dict[str, Any]) -> str:
         from ..core.stats import human_bytes, human_duration
 
+        def item_label(name: str, artist: str | None = None) -> str:
+            if artist and artist.strip():
+                return f"{name} — {artist}"
+            return name
+
         totals = report["totals"]
         scan = report["scan"]
         lines = [
@@ -283,9 +288,16 @@ class LibraryPanel(VerticalScroll):
                     )
                 else:
                     lines.extend(
-                        f"  {entry['name']} — {entry.get('artist', '')} ({entry['tracks']})"
+                        f"  {item_label(entry['name'], entry.get('artist'))} ({entry['tracks']})"
                         for entry in entries[:8]
                     )
+        tracks = report.get("top_tracks") or []
+        if tracks:
+            lines.extend(("", "Tracks"))
+            lines.extend(
+                f"  {item_label(entry['name'], entry.get('artist'))} ({entry['tracks']})"
+                for entry in tracks[:8]
+            )
         for title, key in (("Genres", "top_genres"), ("Decades", "decades")):
             section = report.get(key) or {}
             entries = section.get("entries") or []
