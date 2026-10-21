@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from mornye.core import smb_library_scan as scan
 from mornye.core.network_destinations import validate_profile
 
-
 PROFILE = validate_profile(
     {
         "id": "destination1234",
@@ -118,7 +117,9 @@ def test_scan_builds_stats_report_without_touching_download_log(monkeypatch) -> 
             return files
 
     monkeypatch.setattr(scan, "SMBBackend", Backend)
-    monkeypatch.setattr(scan, "_read_remote_file", lambda _backend, item: records[item["path"]])
+    monkeypatch.setattr(
+        scan, "_read_remote_file", lambda _backend, item: records[item["path"]]
+    )
     progress = []
 
     report = scan.scan_smb_library(

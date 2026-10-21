@@ -7,7 +7,6 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.message import Message
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from ..core.network_destinations import DESTINATIONS, DestinationError
@@ -57,7 +56,12 @@ class LibraryPanel(VerticalScroll):
                 password=True,
                 id="library-smb-password",
             ),
-            Input(value="15", placeholder="Timeout", id="library-smb-timeout", type="integer"),
+            Input(
+                value="15",
+                placeholder="Timeout",
+                id="library-smb-timeout",
+                type="integer",
+            ),
             classes="library-fields",
         )
         yield Horizontal(
@@ -96,7 +100,10 @@ class LibraryPanel(VerticalScroll):
         picker = self.query_one("#library-smb-profile", Select)
         picker.set_options(
             [
-                (f"{profile['name']} — {profile['host']}/{profile['share']}", profile_id)
+                (
+                    f"{profile['name']} — {profile['host']}/{profile['share']}",
+                    profile_id,
+                )
                 for profile_id, profile in self._profiles.items()
             ]
         )
@@ -124,9 +131,13 @@ class LibraryPanel(VerticalScroll):
             ("domain", "domain"),
             ("timeout", "timeout"),
         ):
-            self.query_one(f"#library-smb-{field}", Input).value = str(profile.get(key) or "")
+            self.query_one(f"#library-smb-{field}", Input).value = str(
+                profile.get(key) or ""
+            )
         self.query_one("#library-smb-password", Input).value = ""
-        self.query_one("#library-smb-encrypt", Switch).value = profile.get("encrypt") is True
+        self.query_one("#library-smb-encrypt", Switch).value = (
+            profile.get("encrypt") is True
+        )
         self._say(f"Selected {profile['name']}. Password is not displayed.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -146,7 +157,9 @@ class LibraryPanel(VerticalScroll):
             "name": self.query_one("#library-smb-name", Input).value.strip(),
             "host": self.query_one("#library-smb-host", Input).value.strip(),
             "share": self.query_one("#library-smb-share", Input).value.strip(),
-            "subdirectory": self.query_one("#library-smb-subdirectory", Input).value.strip(),
+            "subdirectory": self.query_one(
+                "#library-smb-subdirectory", Input
+            ).value.strip(),
             "username": self.query_one("#library-smb-username", Input).value.strip(),
             "domain": self.query_one("#library-smb-domain", Input).value.strip(),
             "timeout": int(self.query_one("#library-smb-timeout", Input).value or "15"),
@@ -192,7 +205,9 @@ class LibraryPanel(VerticalScroll):
     async def _test_connection(self) -> None:
         self._set_busy(True)
         try:
-            profile, password = await asyncio.to_thread(self._saved_profile_and_password)
+            profile, password = await asyncio.to_thread(
+                self._saved_profile_and_password
+            )
             from ..core.network_destinations import SMBBackend
 
             result = await asyncio.to_thread(
@@ -211,7 +226,9 @@ class LibraryPanel(VerticalScroll):
         report = self.query_one("#library-report", Static)
         report.update("Connecting to SMB library…")
         try:
-            profile, password = await asyncio.to_thread(self._saved_profile_and_password)
+            profile, password = await asyncio.to_thread(
+                self._saved_profile_and_password
+            )
             from ..core.smb_library_scan import scan_smb_library
 
             def progress(done: int, total: int) -> None:
