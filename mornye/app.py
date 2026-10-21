@@ -798,26 +798,6 @@ class MornyeAPI(
         except Exception:
             pass
 
-    def get_network_status(self):
-        async def _inner():
-            try:
-                client = AsyncHttpClient("network", timeout_s=10)
-                resp = await client.get("https://ipapi.co/json/", timeout=10)
-                data = resp.json() if resp.status_code == 200 else {}
-                return {
-                    "ip": data.get("ip", "Unavailable"),
-                    "country_name": data.get("country_name", "Unknown"),
-                    "country_code": data.get("country_code", ""),
-                }
-            except Exception:
-                return {
-                    "ip": "Unavailable",
-                    "country_name": "Unknown",
-                    "country_code": "",
-                }
-
-        return run_sync(_inner())
-
     def save_profile_data(self, name, cfg) -> bool | None:
         try:
             from .core.profiles import save_profile_async

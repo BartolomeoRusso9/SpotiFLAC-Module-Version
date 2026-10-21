@@ -24,6 +24,7 @@ class LinkResolver:
     #: The project's cross-platform resolver. It returns the ISRC alongside
     #: the links and accepts both source URLs and platform/id payloads.
     RESOLVE_API_URL = "https://api.zarz.moe/v1/resolve"
+    UNITUNE_RESOLVE_API_URL = "https://api.unitune.art/v1-alpha.1/links"
 
     #: The resolver's platform names, mapped onto the names used by the app.
     _RESOLVE_PLATFORM_KEYS = {
@@ -196,14 +197,78 @@ class LinkResolver:
                 links[platform] = self._normalize_platform_url(platform, url)
         return links
 
+    def _process_unitune_response(self, data: dict) -> dict[str, str]:
+        platform_keys = {
+            "spotify": "spotify",
+            "deezer": "deezer",
+            "tidal": "tidal",
+            "appleMusic": "appleMusic",
+            "amazonMusic": "amazonMusic",
+            "soundcloud": "soundcloud",
+            "qobuz": "qobuz",
+            "youtubeMusic": "youtubeMusic",
+            "youtube": "youtube",
+        }
+        platform_links = data.get("linksByPlatform") if isinstance(data, dict) else None
+        if not isinstance(platform_links, dict):
+            return {}
+        links: dict[str, str] = {}
+        for source_key, platform in platform_keys.items():
+            raw = platform_links.get(source_key)
+            url = raw if isinstance(raw, str) else ""
+            if isinstance(raw, dict):
+                url = str(raw.get("url") or raw.get("link") or "")
+            if url:
+                links[platform] = self._normalize_platform_url(platform, url)
+        return links
+
+    def _unitune_source_url(self, payload: dict) -> str:
+        source_url = payload.get("url")
+        if isinstance(source_url, str) and source_url.strip():
+            return source_url.strip()
+        if payload.get("type") != "track" or not payload.get("id"):
+            return ""
+        platform_urls = {
+            "spotify": "https://open.spotify.com/track/{}",
+            "deezer": "https://www.deezer.com/track/{}",
+            "tidal": "https://tidal.com/track/{}",
+            "AppleMusic": "https://music.apple.com/song/{}",
+            "appleMusic": "https://music.apple.com/song/{}",
+            "AmazonMusic": "https://music.amazon.com/tracks/{}",
+            "amazonMusic": "https://music.amazon.com/tracks/{}",
+            "YouTubeMusic": "https://music.youtube.com/watch?v={}",
+            "youtubeMusic": "https://music.youtube.com/watch?v={}",
+        }
+        template = platform_urls.get(str(payload.get("platform") or ""))
+        if not template:
+            return ""
+        return template.format(urllib.parse.quote(str(payload["id"]), safe=""))
+
+    async def _resolve_unitune_async(self, payload: dict) -> dict[str, str]:
+        source_url = self._unitune_source_url(payload)
+        if not source_url:
+            return {}
+        try:
+            response = await self.http.get(
+                self.UNITUNE_RESOLVE_API_URL,
+                params={"url": source_url},
+                timeout=20,
+            )
+            return self._process_unitune_response(response.json())
+        except Exception as exc:
+            logger.debug("[link_resolver] UniTune API failed: %s", exc)
+            return {}
+
     async def _resolve_links_async(self, payload: dict) -> dict[str, str]:
         """Ask the cross-platform resolver, returning an empty result on error."""
         try:
             resp = await self.http.post(self.RESOLVE_API_URL, json=payload, timeout=20)
-            return self._process_resolve_response(resp.json())
+            links = self._process_resolve_response(resp.json())
+            if links:
+                return links
         except Exception as exc:
             logger.debug("[link_resolver] resolve API failed for %s: %s", payload, exc)
-            return {}
+        return await self._resolve_unitune_async(payload)
 
     def _normalize_platform_url(self, platform: str, url: str) -> str:
         url = url.strip()

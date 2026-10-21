@@ -13,6 +13,8 @@ own — never a view of everybody's downloads.
 
 from __future__ import annotations
 
+import threading
+
 
 class StatsMixin:
     def get_stats(
@@ -42,6 +44,50 @@ class StatsMixin:
             )
         except Exception as e:
             return {"error": str(e)}
+
+    def scan_smb_library(self, profile_id: str) -> dict:
+        """Scan a saved SMB destination and push the read-only stats report."""
+        from ..core.network_destinations import DESTINATIONS, DestinationError
+
+        profile = DESTINATIONS.get(str(profile_id or ""))
+        if profile is None:
+            return {
+                "status": "error",
+                "error": "That SMB destination no longer exists.",
+            }
+        try:
+            password = DESTINATIONS.credentials(
+                profile,
+                owner=getattr(self, "owner", "") or "",
+            )
+        except DestinationError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        threading.Thread(
+            target=self._scan_smb_library_thread,
+            args=(profile, password),
+            daemon=True,
+        ).start()
+        return {"status": "started"}
+
+    def _scan_smb_library_thread(self, profile, password: str) -> None:
+        from ..core.smb_library_scan import scan_smb_library
+
+        def progress(done: int, total: int) -> None:
+            self._push("app_smb_library_progress", {"done": done, "total": total})
+
+        try:
+            report = scan_smb_library(
+                profile,
+                profile.username,
+                password,
+                progress=progress,
+            )
+        except Exception as exc:
+            self.log(f"[stats] SMB library scan failed: {exc}", "error")
+            self._push("app_smb_library_error", str(exc))
+            return
+        self._push("app_smb_library_results", report)
 
     @property
     def stats_owner(self) -> str | None:

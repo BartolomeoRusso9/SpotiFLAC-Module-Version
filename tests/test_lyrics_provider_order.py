@@ -105,11 +105,11 @@ def test_an_empty_first_choice_falls_through_in_order(monkeypatch) -> None:
         monkeypatch,
         {
             "apple": (0.0, ""),
-            "musixmatch": (0.05, "[00:01.00]from musixmatch"),
+            "lyricsplus": (0.05, "[00:01.00]from lyricsplus"),
             "lrclib": (0.0, LRCLIB_LRC),
         },
     )
-    assert _fetch(["apple", "musixmatch", "lrclib"])[1] == "musixmatch"
+    assert _fetch(["apple", "lyricsplus", "lrclib"])[1] == "lyricsplus"
 
 
 def test_a_provider_that_raises_is_skipped_not_fatal(monkeypatch) -> None:
@@ -125,6 +125,126 @@ def test_a_provider_that_raises_is_skipped_not_fatal(monkeypatch) -> None:
 def test_nothing_anywhere_returns_nothing(monkeypatch) -> None:
     _providers(monkeypatch, {"apple": (0.0, ""), "lrclib": (0.0, "   ")})
     assert _fetch(["apple", "lrclib"]) == ("", "")
+
+
+def test_new_catalogues_are_selectable_but_not_default() -> None:
+    assert {"lyricsplus", "lrcred"}.issubset(L._PROVIDER_MAP)
+    retired = {
+        "paxsenix",
+        "musixmatch",
+        "deezer",
+        "genius",
+        "netease",
+        "qq",
+        "youtube",
+        "kugou",
+    }
+    assert not retired.intersection(L._PROVIDER_MAP)
+    assert not {"lyricsplus", "lrcred"}.intersection(L.DEFAULT_LYRICS_PROVIDERS)
+
+
+def test_timed_token_payload_becomes_enhanced_lrc() -> None:
+    payload = {
+        "type": "syllable",
+        "lyrics": [
+            {
+                "time": 1200,
+                "text": "Hello ",
+                "isLineEnding": 0,
+                "element": {"key": "L1"},
+            },
+            {
+                "time": 1600,
+                "text": "world",
+                "isLineEnding": 1,
+                "element": {"key": "L1"},
+            },
+        ],
+    }
+
+    assert L._timeline_payload_to_lrc(payload) == (
+        "[00:01.20]<00:01.20>Hello <00:01.60>world"
+    )
+
+
+def test_line_timed_token_payload_becomes_plain_lrc() -> None:
+    payload = {
+        "type": "Line",
+        "lyrics": [
+            {"time": 1200, "text": "Hello world", "isLineEnding": 1},
+        ],
+    }
+
+    assert L._timeline_payload_to_lrc(payload) == "[00:01.20]Hello world"
+
+
+def test_lrcred_requires_a_valid_isrc() -> None:
+    assert asyncio.run(L._fetch_lrcred_async("not-an-isrc")) == ""
+
+
+def test_lyricsplus_request_includes_track_metadata(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class _Response:
+        is_success = True
+
+        def json(self):
+            return {
+                "type": "Line",
+                "lyrics": [{"time": 0, "text": "Hello", "isLineEnding": 1}],
+            }
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return _Response()
+
+    async def client():
+        return _Client()
+
+    monkeypatch.setattr(L.NetworkManager, "get_async_client_safe", client)
+    text = asyncio.run(
+        L._fetch_lyricsplus_async("Hello", "Adele", "25", 232, "GBUM71705975")
+    )
+
+    assert text == "[00:00.00]Hello"
+    assert calls[0]["url"].endswith("/v1/lyrics/get")
+    assert calls[0]["params"] == {
+        "title": "Hello",
+        "artist": "Adele",
+        "v": "1",
+        "album": "25",
+        "duration": "232",
+        "isrc": "GBUM71705975",
+    }
+
+
+def test_lrcred_converts_the_isrc_ttml_resource_to_lrc(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class _Response:
+        is_success = True
+        text = "<tt>lyrics fixture</tt>"
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return _Response()
+
+    async def client():
+        return _Client()
+
+    monkeypatch.setattr(
+        "mornye.core.apple_ttml.ttml_to_lrc",
+        lambda xml_text: (
+            "[00:01.00]Hello" if xml_text == "<tt>lyrics fixture</tt>" else ""
+        ),
+    )
+    monkeypatch.setattr(L.NetworkManager, "get_async_client_safe", client)
+    text = asyncio.run(L._fetch_lrcred_async("gbUm71029604"))
+
+    assert text == "[00:01.00]Hello"
+    assert calls[0]["url"] == "https://lrc.red/s/GBUM71029604.ttml"
 
 
 # --- the Apple word-by-word conversion --------------------------------------

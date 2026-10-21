@@ -11,16 +11,11 @@ import httpx
 _UA = "Mornye-HealthCheck/5.0"
 _TIMEOUT = httpx.Timeout(connect=2.0, read=3.0, write=2.0, pool=2.0)
 _SERVERS = {
-    "apple": "https://lyrics.paxsenix.org/apple-music/lyrics?id=1440650711",
+    "apple": "https://api.zarz.moe/apple-music/lyrics?id=6781024437&format=elrc",
+    "lyricsplus": "https://lyricsplus.prjktla.my.id/v1/lyrics/get?title=Bohemian%20Rhapsody&artist=Queen&isrc=GBUM71029604",
+    "lrcred": "https://lrc.red/s/GBUM71029604.ttml",
     "lrclib": "https://lrclib.net/api/get?artist_name=Queen&track_name=Bohemian%20Rhapsody",
-    "musixmatch": "https://lyrics.paxsenix.org/musixmatch/lyrics?type=word&t=Bohemian%20Rhapsody&a=Queen&d=355&format=lrc",
     "spotify": "https://spclient.wg.spotify.com/color-lyrics/v2/track/0UHB9METy4VCXNgkcGqHqS?format=json&market=from_token",
-    "deezer": "https://lyrics.paxsenix.org/deezer/lyrics?id=3135556",
-    "genius": "https://lyrics.paxsenix.org/genius/lyrics?url=https%3A%2F%2Fgenius.com%2FQueen-bohemian-rhapsody-lyrics",
-    "netease": "https://lyrics.paxsenix.org/netease/search?q=Bohemian%20Rhapsody%20Queen",
-    "qq": "https://lyrics.paxsenix.org/qq/search?q=Bohemian%20Rhapsody%20Queen",
-    "youtube": "https://lyrics.paxsenix.org/youtube/search?q=Bohemian%20Rhapsody%20Queen",
-    "kugou": "https://lyrics.paxsenix.org/kugou/search?q=Bohemian%20Rhapsody%20Queen",
     "binilyrics": "https://lyrics-api.binimum.org/?track=Bohemian%20Rhapsody&artist=Queen&duration=355",
     # Unison answers 404 for anything it has no lyrics for, and it has few:
     # this is a track it does have.

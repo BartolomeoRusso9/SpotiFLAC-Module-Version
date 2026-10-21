@@ -132,7 +132,6 @@ ALLOWED_METHODS: set[str] = {
     "search_provider_async",
     "get_metadata_sources",
     "remove_history_item",
-    "get_network_status",
     "save_profile_data",
     "delete_profile_data",
     "check_qobuz_api",
@@ -192,6 +191,7 @@ ALLOWED_METHODS: set[str] = {
     # the calling account's own history: each account gets its own Api
     # instance, and `owner` is set on it above.
     "get_stats",
+    "scan_smb_library",
     # The tracks still missing after a download (see core/failed_tracks.py).
     # Retrying is a download like any other; clearing only edits the list.
     "get_failed_tracks",
@@ -1225,11 +1225,11 @@ def create_app(token: str | None = None, multiuser: bool = False) -> FastAPI:
         html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
         inject = (
             "<script>window.__MORNYE_WEB_MODE__ = true;</script>\n"
-            '<script src="/web-shim.js?v=20261013"></script>\n'
+            '<script src="/web-shim.js?v=20261021"></script>\n'
         )
         html = html.replace(
-            '<script src="toast-system.js?v=20261013"></script>',
-            inject + '<script src="toast-system.js?v=20261013"></script>',
+            '<script src="toast-system.js?v=20261021"></script>',
+            inject + '<script src="toast-system.js?v=20261021"></script>',
         )
         # Marks the document as browser-served before the first paint, so CSS
         # can drop the chrome that only makes sense in the pywebview window

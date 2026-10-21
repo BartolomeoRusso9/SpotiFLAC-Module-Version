@@ -17,7 +17,7 @@
        tells itself apart from --web. Harmless to load in the desktop
        pywebview window too: manifest/theme-color are simply unused there,
        and the registration script below no-ops without that flag. -->
-  <link rel="manifest" href="manifest.json?v=20261020-mornye-logo">
+  <link rel="manifest" href="manifest.json?v=20261021-mornye-logo">
   <meta name="theme-color" content="#000000">
   <!-- apple-mobile-web-app-capable is the legacy spelling Safari still reads;
        mobile-web-app-capable is the standard one everything else reads. Both,
@@ -36,7 +36,7 @@
        be there. The artwork already ships. -->
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/logo-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261020-mornye-logo">
+  <link rel="stylesheet" href="styles.css?v=20261021-mornye-logo">
   <script>
     // Theme, applied before the first paint. app.js used to do this only from
     // its 'pywebviewready' handler, which meant the window painted light and
@@ -105,20 +105,6 @@
   </div>
   
   <div class="pywebview-drag-region" style="flex: 1; height: 100%; -webkit-app-region: drag;"></div>
-
-  <!-- Which country the app's requests appear to come from. It matters here
-       because catalogues are region-locked: a track "not available" is very
-       often not-available-*there*. Shown only on the Settings view (see
-       switchView in app.js, which also triggers the lookup) — the styling
-       and the fetch have existed for a while, this markup was the missing
-       piece. Country only: togglePublicIp() in app.js is a stub marked
-       "removed by design", so the IP itself stays out of the window. -->
-  <div id="titlebar-network" class="hidden" title="Country your connection appears to come from">
-    <span class="network-pill">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-      <span id="network-country">—</span>
-    </span>
-  </div>
 
   <div id="tb-logo">
     <span>Mornye</span>
@@ -585,7 +571,16 @@
     <div class="view" id="view-stats">
       <div class="s-header">
         <h1>Your library</h1>
-        <div class="s-actions">
+        <div class="s-actions stats-actions">
+          <div class="stats-smb-controls">
+            <select id="stats-smb-destination" aria-label="SMB library destination" title="Saved SMB library">
+              <option value="">Loading SMB destinations…</option>
+            </select>
+            <button class="act-btn secondary" type="button" id="stats-smb-scan" onclick="scanSmbLibrary()" disabled title="Scan the selected SMB library">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/><circle cx="12" cy="14" r="3"/><path d="M12 12v4m-1.5-1.5h3"/></svg>
+              Scan SMB
+            </button>
+          </div>
           <select id="stats-period" onchange="loadStats()" style="max-width:170px;">
             <option value="all">All time</option>
             <option value="year">This year</option>
@@ -596,12 +591,11 @@
         </div>
       </div>
       <div class="s-body">
-        <p style="font-size:12px;color:var(--muted);margin:-4px 0 14px;line-height:1.6;">
-          Built from what this install has actually downloaded. Genre, release
-          year and duration are only recorded for downloads made since this
-          feature landed, and a genre needs metadata enrichment to have been
-          on — each section says how much of your history it could use.
+        <p class="stats-intro">
+          Browse this install’s download history or scan a saved SMB library in place. Genre,
+          release year and duration appear where tags are available.
         </p>
+        <div id="stats-smb-status" class="stats-smb-status hidden" role="status" aria-live="polite"></div>
         <div id="stats-body">
           <div class="s-label" style="font-size:11.5px;">Loading…</div>
         </div>
@@ -758,69 +752,85 @@
             <div class="s-row"><span class="s-label">Source priority (drag to reorder)</span></div>
             <div id="services-list" class="sort-list"></div>
           </div>
-          <div class="s-section s-wide">
+          <div class="s-section s-wide network-destinations">
             <div class="s-title">Network Destinations</div>
-            <div class="s-row">
-              <span class="s-label">Destination for new download jobs<small>Mounted folders work as local output paths. Native SMB requires the optional smb extra; passwords use the OS credential store when a secure backend is available, otherwise they remain session-only.</small></span>
-              <select id="config-network-destination">
-                <option value="">Local / mounted folder</option>
-              </select>
-            </div>
-            <div class="s-row">
-              <span class="s-label">Saved SMB destination</span>
-              <select id="network-destination-profile" onchange="selectNetworkDestination()">
-                <option value="">New destination…</option>
-              </select>
-            </div>
-            <div class="s-row">
-              <span class="s-label">Profile name</span>
-              <input type="text" id="network-destination-name" maxlength="80" placeholder="Home NAS">
-            </div>
-            <div class="s-row">
-              <span class="s-label">SMB server</span>
-              <input type="text" id="network-destination-host" placeholder="nas.example.net or 192.0.2.10" autocomplete="off">
-            </div>
-            <div class="s-row">
-              <span class="s-label">Share name</span>
-              <input type="text" id="network-destination-share" placeholder="Music">
-            </div>
-            <div class="s-row">
-              <span class="s-label">Destination subfolder<small>Relative to the share; leave blank for its root</small></span>
-              <input type="text" id="network-destination-subdirectory" placeholder="Library/Albums">
-            </div>
-            <div class="s-row">
-              <span class="s-label">Username and optional domain</span>
-              <div style="display:flex;gap:8px;width:100%">
-                <input type="text" id="network-destination-username" placeholder="Username" autocomplete="off">
-                <input type="text" id="network-destination-domain" placeholder="Domain (optional)" autocomplete="off">
+            <div class="network-destination-layout">
+              <div class="network-destination-group">
+                <div class="network-destination-heading">Destination</div>
+                <div class="network-destination-fields">
+                  <label class="network-destination-field network-destination-field-wide" for="config-network-destination">
+                    <span>Destination for new download jobs<small>Mounted folders work as local output paths. Native SMB requires the optional smb extra.</small></span>
+                    <select id="config-network-destination">
+                      <option value="">Local / mounted folder</option>
+                    </select>
+                  </label>
+                  <label class="network-destination-field" for="network-destination-profile">
+                    <span>Saved SMB destination</span>
+                    <select id="network-destination-profile" onchange="selectNetworkDestination()">
+                      <option value="">New destination…</option>
+                    </select>
+                  </label>
+                  <label class="network-destination-field" for="network-destination-name">
+                    <span>Profile name</span>
+                    <input type="text" id="network-destination-name" maxlength="80" placeholder="Home NAS">
+                  </label>
+                  <label class="network-destination-field" for="network-destination-host">
+                    <span>SMB server</span>
+                    <input type="text" id="network-destination-host" placeholder="nas.example.net or 192.0.2.10" autocomplete="off">
+                  </label>
+                  <label class="network-destination-field" for="network-destination-share">
+                    <span>Share name</span>
+                    <input type="text" id="network-destination-share" placeholder="Music">
+                  </label>
+                  <label class="network-destination-field network-destination-field-wide" for="network-destination-subdirectory">
+                    <span>Destination subfolder<small>Relative to the share; leave blank for its root</small></span>
+                    <input type="text" id="network-destination-subdirectory" placeholder="Library/Albums">
+                  </label>
+                </div>
+              </div>
+
+              <div class="network-destination-group">
+                <div class="network-destination-heading">Connection</div>
+                <div class="network-destination-fields network-destination-connection-fields">
+                  <div class="network-destination-field network-destination-field-wide">
+                    <span>Username and optional domain</span>
+                    <div class="network-destination-inline">
+                      <input type="text" id="network-destination-username" placeholder="Username" autocomplete="off" aria-label="Username">
+                      <input type="text" id="network-destination-domain" placeholder="Domain (optional)" autocomplete="off" aria-label="Domain (optional)">
+                    </div>
+                  </div>
+                  <label class="network-destination-field network-destination-field-wide" for="network-destination-password">
+                    <span>Password<small>Never saved to settings. Uses the secure OS credential store when available; otherwise it is session-only. Multi-user web credentials are always session-only.</small></span>
+                    <input type="password" id="network-destination-password" autocomplete="new-password">
+                  </label>
+                  <label class="network-destination-field" for="network-destination-timeout">
+                    <span>Connection timeout</span>
+                    <div class="network-destination-timeout-control">
+                      <input type="number" id="network-destination-timeout" value="15" min="1" max="120">
+                      <span>seconds</span>
+                    </div>
+                  </label>
+                  <div class="network-destination-encryption">
+                    <span id="network-destination-encrypt-label">Require SMB3 encryption<small>Use when required by the server.</small></span>
+                    <label class="toggle">
+                      <input type="checkbox" id="network-destination-encrypt" aria-labelledby="network-destination-encrypt-label">
+                      <span class="toggle-sl"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="network-destination-actions">
+                  <button class="act-btn primary" type="button" onclick="saveNetworkDestination()">Save Profile</button>
+                  <button class="act-btn secondary" type="button" onclick="testNetworkDestination()">Test Connection</button>
+                  <button class="act-btn secondary" type="button" onclick="removeNetworkDestination()">Remove</button>
+                  <span id="network-destination-status" role="status"></span>
+                </div>
               </div>
             </div>
-            <div class="s-row">
-              <span class="s-label">Password<small>Never written to settings or profile files. Uses a secure OS credential store when available; otherwise it is session-only. Multi-user web credentials are always session-only.</small></span>
-              <input type="password" id="network-destination-password" autocomplete="new-password">
-            </div>
-            <div class="s-row">
-              <span class="s-label">Connection timeout (seconds)</span>
-              <input type="number" id="network-destination-timeout" value="15" min="1" max="120">
-            </div>
-            <div class="s-row">
-              <span class="s-label">Require SMB3 encryption<small>Use when required by the server; this does not weaken server authentication.</small></span>
-              <label class="toggle">
-                <input type="checkbox" id="network-destination-encrypt">
-                <span class="toggle-sl"></span>
+            <div class="network-destination-retry">
+              <label class="network-destination-field" for="network-destination-retry-id">
+                <span>Retry retained transfer<small>Use the identifier from the download log after an interrupted transfer.</small></span>
               </label>
-            </div>
-            <div class="s-row">
-              <span style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="act-btn primary" type="button" onclick="saveNetworkDestination()">Save Profile</button>
-                <button class="act-btn secondary" type="button" onclick="testNetworkDestination()">Test Connection</button>
-                <button class="act-btn secondary" type="button" onclick="removeNetworkDestination()">Remove</button>
-              </span>
-              <span id="network-destination-status" role="status" style="font-size:12px;color:var(--muted)"></span>
-            </div>
-            <div class="s-row">
-              <span class="s-label">Retry retained transfer<small>Enter the retry identifier shown in the download log after an interrupted transfer.</small></span>
-              <div style="display:flex;gap:8px;width:100%">
+              <div class="network-destination-retry-controls">
                 <input type="text" id="network-destination-retry-id" placeholder="32-character retry identifier" autocomplete="off">
                 <button class="act-btn secondary" type="button" onclick="retryNetworkDelivery()">Retry</button>
               </div>
@@ -1316,8 +1326,8 @@
           <div id="queue-counter"><span id="q-count">0 tracks</span><span id="q-done"></span></div>
         </div>
       </div>
-  <script src="toast-system.js?v=20261013"></script>
-  <script src="app.js?v=20261013"></script>
+  <script src="toast-system.js?v=20261021"></script>
+  <script src="app.js?v=20261021"></script>
   <script>
     // --web mode only (see sw.js's own comment for what the service worker
     // actually does — installability, not offline caching of live data).

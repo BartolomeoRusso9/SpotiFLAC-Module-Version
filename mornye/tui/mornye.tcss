@@ -434,6 +434,7 @@ ProgressBar > Bar > .bar--indeterminate {
 #search-query { margin-bottom: 1; }
 #search-status,
 #health-status,
+#library-status,
 #signed-status,
 #registry-status,
 #session-status {
@@ -442,12 +443,46 @@ ProgressBar > Bar > .bar--indeterminate {
 }
 
 #search-results,
+#library-report,
 #health-table,
 #signed-table,
 #registry-table {
     height: auto;
     max-height: 20;
     border: round $panel-lighten-1;
+}
+
+#library-report {
+    height: auto;
+    min-height: 8;
+    max-height: 24;
+    padding: 1 2;
+    border: round $panel-lighten-1;
+    color: $text;
+}
+
+.library-fields {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.library-fields Input {
+    width: 1fr;
+    max-width: 48;
+}
+
+.library-encryption {
+    height: 3;
+    align: left middle;
+}
+
+.library-encryption Switch {
+    margin-right: 1;
+}
+
+.library-actions {
+    height: auto;
+    margin: 1 0;
 }
 
 DataTable > .datatable--header {

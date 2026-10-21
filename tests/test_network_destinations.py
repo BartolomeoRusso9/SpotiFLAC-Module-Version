@@ -153,6 +153,121 @@ def test_ipv6_server_uses_bracketed_unc_path():
     assert backend.root == r"\\[2001:db8::1]\Music"
 
 
+def test_smb_audio_listing_is_recursive_read_only_and_filters_unsafe_entries():
+    profile = _profile(subdirectory="")
+    root = r"\\nas.example.net\Music"
+    nested = root + r"\Albums"
+
+    class Entry:
+        def __init__(self, name, mode, size=0):
+            self.name = name
+            self._info = SimpleNamespace(st_mode=mode, st_size=size, st_mtime=1234)
+
+        def stat(self, follow_symlinks=False):
+            assert follow_symlinks is False
+            return self._info
+
+    class ListingClient(_FakeSMBClient):
+        def scandir(self, path):
+            if path == root:
+                return [
+                    Entry("Albums", stat.S_IFDIR),
+                    Entry("top.flac", stat.S_IFREG, 100),
+                    Entry("notes.txt", stat.S_IFREG, 20),
+                    Entry("link.flac", stat.S_IFLNK, 40),
+                    Entry("../outside.flac", stat.S_IFREG, 50),
+                    Entry(".hidden", stat.S_IFDIR),
+                ]
+            if path == nested:
+                return [Entry("record.m4a", stat.S_IFREG, 200)]
+            raise FileNotFoundError(path)
+
+    client = ListingClient()
+    backend = SMBBackend(profile, "user", "pass", client=client)
+    files = backend.list_audio_files()
+
+    assert [item["path"] for item in files] == [
+        root + r"\Albums\record.m4a",
+        root + r"\top.flac",
+    ]
+    assert files[0]["size"] == 200
+    assert all(item["modified"] == 1234 for item in files)
+    assert client.files == {}
+
+
+def test_smb_open_audio_file_rejects_paths_outside_the_configured_share():
+    backend = SMBBackend(
+        _profile(subdirectory=""), "user", "pass", client=_FakeSMBClient()
+    )
+
+    with pytest.raises(DestinationError, match="outside this SMB destination"):
+        backend.open_audio_file(r"\\other.example.net\Music\song.flac")
+
+
+def test_smb_stats_scan_aggregates_tags_without_writing_to_the_share(monkeypatch):
+    from mornye.core import smb_library_scan
+
+    profile = _profile()
+    files = [
+        {"path": r"\\nas.example.net\Music\song-a.flac", "size": 100, "modified": 1},
+        {"path": r"\\nas.example.net\Music\song-b.m4a", "size": 200, "modified": 2},
+        {"path": r"\\nas.example.net\Music\broken.flac", "size": 50, "modified": 3},
+    ]
+
+    class FakeBackend:
+        def __init__(self, selected_profile, username, password):
+            assert selected_profile == profile
+            assert (username, password) == ("user", "pass")
+            self.writes = 0
+
+        def list_audio_files(self):
+            return files
+
+        def open_audio_file(self, path):
+            return io.BytesIO(path.encode())
+
+    class Audio:
+        def __init__(self, title, album, genre, date, duration):
+            self.tags = {
+                "title": [title],
+                "artist": ["Queen"],
+                "album": [album],
+                "genre": [genre] if genre else [],
+                "date": [date] if date else [],
+            }
+            self.info = SimpleNamespace(length=duration)
+
+    def fake_mutagen_file(stream, easy):
+        assert easy is True
+        if stream.name.endswith("song-a.flac"):
+            return Audio("First", "Night at the Opera", "Rock", "1975", 300)
+        if stream.name.endswith("song-b.m4a"):
+            return Audio("Second", "Night at the Opera", "", "", 240)
+        return None
+
+    monkeypatch.setattr(smb_library_scan, "SMBBackend", FakeBackend)
+    monkeypatch.setattr(smb_library_scan.mutagen, "File", fake_mutagen_file)
+    progress = []
+
+    result = smb_library_scan.scan_smb_library(
+        profile,
+        "user",
+        "pass",
+        progress=lambda done, total: progress.append((done, total)),
+    )
+
+    assert result["source"] == "smb"
+    assert result["source_name"] == "Home NAS"
+    assert result["scan"] == {"files": 3, "readable": 2, "unreadable": 1}
+    assert result["totals"]["tracks"] == 2
+    assert result["totals"]["failed"] == 1
+    assert result["totals"]["bytes"] == 350
+    assert result["top_artists"][0]["name"] == "Queen"
+    assert result["top_genres"]["entries"][0]["name"] == "Rock"
+    assert result["decades"]["entries"][0]["name"] == "1970s"
+    assert progress == [(3, 3)]
+
+
 def test_profile_store_keeps_password_out_of_private_profile_file(tmp_path):
     store = DestinationStore(tmp_path / "destinations.json")
     profile = store.save(_profile().public_dict(), "top-secret", owner="alice")

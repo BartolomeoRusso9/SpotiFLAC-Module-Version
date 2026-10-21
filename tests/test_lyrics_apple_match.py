@@ -129,8 +129,12 @@ def _fetch(monkeypatch, results) -> tuple[str, list]:
         asked.append(song_id)
         return f"[00:01.00]lyrics of {song_id}"
 
+    async def _zarz(_song_id, _word_by_word=True, _timeout=5):
+        return ""
+
     monkeypatch.setattr(lyrics.NetworkManager, "get_async_client_safe", _client)
     monkeypatch.setattr(lyrics, "_fetch_apple_ttml_async", _ttml)
+    monkeypatch.setattr(lyrics, "_fetch_zarz_apple_async", _zarz)
     text = asyncio.run(lyrics._fetch_apple_async("Valentino", "Vale Lambo", 180))
     return text, asked
 
@@ -146,3 +150,56 @@ def test_the_matching_result_is_the_one_fetched(monkeypatch) -> None:
     text, asked = _fetch(monkeypatch, results)
     assert asked == ["99"]
     assert "lyrics of 99" in text
+
+
+@pytest.mark.parametrize(
+    ("word_by_word", "expected_format"),
+    [(True, "elrc"), (False, "lrc")],
+)
+def test_zarz_uses_the_requested_lyrics_format(
+    monkeypatch, word_by_word: bool, expected_format: str
+) -> None:
+    calls: list[dict] = []
+
+    class ZarzResponse:
+        is_success = True
+        text = "[00:01.00]lyrics"
+
+    class ZarzClient:
+        async def get(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return ZarzResponse()
+
+    async def _client():
+        return ZarzClient()
+
+    monkeypatch.setattr(lyrics.NetworkManager, "get_async_client_safe", _client)
+    text = asyncio.run(lyrics._fetch_zarz_apple_async("99", word_by_word))
+
+    assert text == "[00:01.00]lyrics"
+    assert calls[0]["url"] == "https://api.zarz.moe/apple-music/lyrics"
+    assert calls[0]["params"] == {"id": "99", "format": expected_format}
+
+
+def test_zarz_result_precedes_paxsenix_fallback(monkeypatch) -> None:
+    results = [_res("Valentino", "Vale Lambo", 180, 99)]
+    calls: list[tuple[str, bool]] = []
+
+    async def _no_native(_song_id, _word_by_word=True):
+        return ""
+
+    async def _zarz(song_id, word_by_word=True, _timeout=5):
+        calls.append((song_id, word_by_word))
+        return "[00:01.00]Zarz lyrics"
+
+    async def _client():
+        return _Client(results)
+
+    monkeypatch.setattr(lyrics.NetworkManager, "get_async_client_safe", _client)
+    monkeypatch.setattr(lyrics, "_fetch_apple_ttml_async", _no_native)
+    monkeypatch.setattr(lyrics, "_fetch_zarz_apple_async", _zarz)
+
+    text = asyncio.run(lyrics._fetch_apple_async("Valentino", "Vale Lambo", 180))
+
+    assert text == "[00:01.00]Zarz lyrics"
+    assert calls == [("99", True)]

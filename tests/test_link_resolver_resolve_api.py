@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import httpx
 import pytest
 
 from mornye.core.link_resolver import LinkResolver
@@ -62,6 +63,14 @@ def test_an_isrc_does_not_replace_the_source_id_lookup(monkeypatch) -> None:
     """The source edition is authoritative; ISRC lookups only fill gaps."""
     resolver = LinkResolver()
     calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "mornye.core.link_resolver.get_cached_response",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "mornye.core.link_resolver.put_cached_response",
+        lambda *_args, **_kwargs: None,
+    )
 
     async def deezer_by_isrc(_isrc):
         """Simulate an ISRC lookup matching a different Deezer edition."""
@@ -103,6 +112,59 @@ def test_both_value_shapes_are_accepted() -> None:
     links = LinkResolver()._process_resolve_response(RESOLVED)
     assert links["spotify"].startswith("https://open.spotify.com/")
     assert links["deezer"].startswith("https://www.deezer.com/")
+
+
+def test_unitune_response_maps_platform_links() -> None:
+    payload = {
+        "linksByPlatform": {
+            "spotify": {"url": "https://open.spotify.com/track/abc"},
+            "deezer": {"url": "https://deezer.com/us/track/123"},
+            "appleMusic": {"url": "https://music.apple.com/us/song/title/456"},
+        },
+    }
+
+    assert LinkResolver()._process_unitune_response(payload) == {
+        "spotify": "https://open.spotify.com/track/abc",
+        "deezer": "https://www.deezer.com/track/123",
+        "appleMusic": "https://music.apple.com/us/song/title/456",
+    }
+
+
+def test_unitune_is_tried_when_primary_resolver_has_no_links() -> None:
+    resolver = LinkResolver()
+    calls: list[dict] = []
+
+    class _Client:
+        async def post(self, *_args, **_kwargs):
+            return httpx.Response(
+                200,
+                json={"success": False},
+                request=httpx.Request("POST", "https://api.zarz.moe/v1/resolve"),
+            )
+
+        async def get(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return httpx.Response(
+                200,
+                json={
+                    "linksByPlatform": {
+                        "deezer": {"url": "https://deezer.com/track/123"}
+                    }
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    resolver.http = _Client()
+    links = asyncio.run(
+        resolver._resolve_links_async(
+            {"platform": "spotify", "type": "track", "id": "track id"}
+        )
+    )
+
+    assert links == {"deezer": "https://www.deezer.com/track/123"}
+    assert calls[0]["params"] == {
+        "url": "https://open.spotify.com/track/track%20id",
+    }
 
 
 def test_a_null_platform_is_skipped_not_recorded_as_empty() -> None:

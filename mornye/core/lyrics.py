@@ -173,10 +173,9 @@ _LRCLIB = "https://lrclib.net/api"
 _SPOTIFY_LYRICS = "https://spclient.wg.spotify.com/color-lyrics/v2/track"
 _ITUNES_SEARCH = "https://itunes.apple.com/search"
 _PAXSENIX_APPLE = "https://lyrics.paxsenix.org/apple-music/lyrics"
-_PAXSENIX_MXM = "https://lyrics.paxsenix.org/musixmatch"
-_PAXSENIX_BASE = "https://lyrics.paxsenix.org"
-_DEEZER_SEARCH = "https://api.deezer.com/search/track"
-_GENIUS_SEARCH = "https://genius.com/api/search/multi"
+_ZARZ_APPLE = "https://api.zarz.moe/apple-music/lyrics"
+_LYRICSPLUS_BASE = "https://lyricsplus.prjktla.my.id"
+_LRC_RED_BASE = "https://lrc.red/s"
 
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0 Safari/537.36"
 _LYRICS_RESPONSE_CACHE_TTL = 7 * 24 * 60 * 60
@@ -457,6 +456,27 @@ async def _fetch_apple_ttml_async(song_id: str, word_by_word: bool = True) -> st
         return ""
 
 
+async def _fetch_zarz_apple_async(
+    song_id: str,
+    word_by_word: bool = True,
+    timeout: int = 5,
+) -> str:
+    try:
+        client = await NetworkManager.get_async_client_safe()
+        response = await client.get(
+            _ZARZ_APPLE,
+            params={"id": song_id, "format": "elrc" if word_by_word else "lrc"},
+            headers={"User-Agent": _UA, "Accept": "text/plain"},
+            timeout=timeout,
+        )
+        if not response.is_success:
+            return ""
+        return response.text.strip()
+    except Exception as exc:
+        logger.debug("[lyrics/apple] Zarz API: %s", exc)
+        return ""
+
+
 async def _fetch_apple_async(
     track_name: str,
     artist_name: str,
@@ -504,6 +524,10 @@ async def _fetch_apple_async(
         direct = await _fetch_apple_ttml_async(str(song_id), word_by_word)
         if direct:
             return direct
+
+        zarz = await _fetch_zarz_apple_async(str(song_id), word_by_word, timeout)
+        if zarz:
+            return zarz
 
         r_lyr = await client.get(
             _PAXSENIX_APPLE,
@@ -641,65 +665,6 @@ def _itunes_result_matches(
     return title_exact
 
 
-async def _fetch_musixmatch_async(
-    track_name: str,
-    artist_name: str,
-    duration_s: int,
-    timeout: int = 7,
-) -> str:
-    import json as _json
-
-    client = await NetworkManager.get_async_client_safe()
-    for sync_type in ["word"]:
-        params = {"t": track_name, "a": artist_name, "type": sync_type, "format": "lrc"}
-        if duration_s > 0:
-            params["d"] = str(duration_s)
-        url = f"{_PAXSENIX_MXM}/lyrics?" + urllib.parse.urlencode(params)
-        try:
-            r = await client.get(
-                url,
-                headers={"User-Agent": _UA, "Accept": "application/json"},
-                timeout=timeout,
-            )
-            if r.is_success:
-                body = r.text.strip()
-                try:
-                    parsed = _json.loads(body)
-                    if isinstance(parsed, str) and parsed.strip():
-                        return parsed.strip()
-                    if isinstance(parsed, dict):
-                        for key in ("lrc", "lyrics", "syncedLyrics", "plainLyrics"):
-                            val = parsed.get(key)
-                            if isinstance(val, str) and val.strip():
-                                return val.strip()
-                except ValueError:
-                    if body and not body.startswith("{"):
-                        return body
-        except Exception as exc:
-            logger.debug("[lyrics/musixmatch] async %s failed: %s", sync_type, exc)
-    return ""
-
-
-def _first_search_item(value: object) -> dict | None:
-    if isinstance(value, list):
-        for item in value:
-            found = _first_search_item(item)
-            if found:
-                return found
-        return None
-    if not isinstance(value, dict):
-        return None
-    if any(
-        key in value for key in ("id", "songId", "songmid", "videoId", "hash", "url")
-    ):
-        return value
-    for key in ("results", "data", "items", "tracks", "songs", "videos"):
-        found = _first_search_item(value.get(key))
-        if found:
-            return found
-    return None
-
-
 def _lyrics_from_payload(value: object) -> str:
     if isinstance(value, str):
         return value.strip()
@@ -719,6 +684,7 @@ def _lyrics_from_payload(value: object) -> str:
         "content",
         "data",
         "result",
+        "text",
     ):
         lyrics = _lyrics_from_payload(value.get(key))
         if lyrics:
@@ -726,125 +692,102 @@ def _lyrics_from_payload(value: object) -> str:
     return ""
 
 
-async def _fetch_paxsenix_search_provider_async(
-    provider: str,
+def _timeline_payload_to_lrc(payload: object) -> str:
+    """Convert a timed lyrics payload with token segments into enhanced LRC."""
+    if not isinstance(payload, dict):
+        return _lyrics_from_payload(payload)
+    segments = payload.get("lyrics")
+    if not isinstance(segments, list) or not segments:
+        return _lyrics_from_payload(payload)
+
+    word_timed = str(payload.get("type") or "").lower() in {"word", "syllable"}
+    lines: list[str] = []
+    current_key: object = None
+    current_segments: list[tuple[int, str]] = []
+
+    def flush() -> None:
+        if not current_segments:
+            return
+        line_start = current_segments[0][0]
+        text = "".join(
+            f"{_format_lrc_timestamp(timestamp, '<')}{part}" if word_timed else part
+            for timestamp, part in current_segments
+        )
+        lines.append(f"{_format_lrc_timestamp(line_start)}{text}")
+        current_segments.clear()
+
+    for segment in segments:
+        if not isinstance(segment, dict) or not isinstance(segment.get("text"), str):
+            continue
+        element = segment.get("element")
+        key = element.get("key") if isinstance(element, dict) else None
+        if current_segments and key is not None and current_key != key:
+            flush()
+        try:
+            timestamp = max(0, int(float(segment.get("time") or 0)))
+        except (TypeError, ValueError):
+            timestamp = current_segments[-1][0] if current_segments else 0
+        current_key = key
+        current_segments.append((timestamp, segment["text"]))
+        if segment.get("isLineEnding"):
+            flush()
+            current_key = None
+
+    flush()
+    return "\n".join(lines).strip() or _lyrics_from_payload(payload)
+
+
+async def _fetch_lyricsplus_async(
     track_name: str,
     artist_name: str,
-    duration_s: int,
+    album_name: str = "",
+    duration_s: int = 0,
+    isrc: str = "",
     timeout: int = 7,
 ) -> str:
-    client = await NetworkManager.get_async_client_safe()
+    if not track_name or not artist_name:
+        return ""
+    params = {"title": track_name, "artist": artist_name, "v": "1"}
+    if album_name:
+        params["album"] = album_name
+    if duration_s > 0:
+        params["duration"] = str(duration_s)
+    if isrc:
+        params["isrc"] = isrc
     try:
-        search = await client.get(
-            f"{_PAXSENIX_BASE}/{provider}/search",
-            params={"q": f"{track_name} {artist_name}"},
-            headers={"User-Agent": _UA, "Accept": "application/json"},
-            timeout=timeout,
-        )
-        if not search.is_success:
-            return ""
-        item = _first_search_item(search.json())
-        if not item:
-            return ""
-        id_keys = {
-            "netease": ("id", "songId"),
-            "qq": ("songmid", "songId", "id"),
-            "youtube": ("videoId", "id"),
-            "kugou": ("hash", "id"),
-        }
-        provider_id = next(
-            (item.get(key) for key in id_keys[provider] if item.get(key)),
-            None,
-        )
-        if not provider_id:
-            return ""
-        params = {"id": str(provider_id), "v": "1"}
-        if provider in {"netease", "kugou"}:
-            params["word"] = "true"
-        lyrics = await client.get(
-            f"{_PAXSENIX_BASE}/{provider}/lyrics",
+        client = await NetworkManager.get_async_client_safe()
+        response = await client.get(
+            f"{_LYRICSPLUS_BASE}/v1/lyrics/get",
             params=params,
             headers={"User-Agent": _UA, "Accept": "application/json"},
             timeout=timeout,
         )
-        if not lyrics.is_success:
+        if not response.is_success:
             return ""
-        return _lyrics_from_payload(lyrics.json())
+        return _timeline_payload_to_lrc(response.json())
     except Exception as exc:
-        logger.debug("[lyrics/%s] async: %s", provider, exc)
+        logger.debug("[lyrics/lyricsplus] async: %s", exc)
         return ""
 
 
-async def _fetch_deezer_async(
-    track_name: str,
-    artist_name: str,
-    timeout: int = 7,
-) -> str:
-    try:
-        client = await NetworkManager.get_async_client_safe()
-        search = await client.get(
-            _DEEZER_SEARCH,
-            params={"q": f"track:{track_name} artist:{artist_name}", "limit": 5},
-            headers={"User-Agent": _UA, "Accept": "application/json"},
-            timeout=timeout,
-        )
-        if not search.is_success:
-            return ""
-        item = _first_search_item(search.json())
-        if not item or not item.get("id"):
-            return ""
-        response = await client.get(
-            f"{_PAXSENIX_BASE}/deezer/lyrics",
-            params={"id": str(item["id"]), "v": "1"},
-            headers={"User-Agent": _UA, "Accept": "application/json"},
-            timeout=timeout,
-        )
-        if not response.is_success:
-            return ""
-        return _lyrics_from_payload(response.json())
-    except Exception as exc:
-        logger.debug("[lyrics/deezer] async: %s", exc)
+async def _fetch_lrcred_async(isrc: str, timeout: int = 7) -> str:
+    normalized_isrc = (isrc or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", normalized_isrc):
         return ""
-
-
-async def _fetch_genius_async(
-    track_name: str,
-    artist_name: str,
-    timeout: int = 7,
-) -> str:
     try:
         client = await NetworkManager.get_async_client_safe()
-        search = await client.get(
-            _GENIUS_SEARCH,
-            params={"q": f"{track_name} {artist_name}", "per_page": 5},
-            headers={"User-Agent": _UA, "Accept": "application/json"},
-            timeout=timeout,
-        )
-        if not search.is_success:
-            return ""
-        data = search.json()
-        url = ""
-        for section in data.get("response", {}).get("sections", []):
-            for hit in section.get("hits", []):
-                result = hit.get("result", {})
-                if result.get("url"):
-                    url = result["url"]
-                    break
-            if url:
-                break
-        if not url:
-            return ""
         response = await client.get(
-            f"{_PAXSENIX_BASE}/genius/lyrics",
-            params={"url": url, "v": "1"},
-            headers={"User-Agent": _UA, "Accept": "application/json"},
+            f"{_LRC_RED_BASE}/{normalized_isrc}.ttml",
+            headers={"User-Agent": _UA, "Accept": "application/ttml+xml"},
             timeout=timeout,
         )
-        if not response.is_success:
+        if not response.is_success or not response.text.strip():
             return ""
-        return _lyrics_from_payload(response.json())
+        from .apple_ttml import ttml_to_lrc
+
+        return ttml_to_lrc(response.text)
     except Exception as exc:
-        logger.debug("[lyrics/genius] async: %s", exc)
+        logger.debug("[lyrics/lrc.red] async: %s", exc)
         return ""
 
 
@@ -1237,6 +1180,14 @@ async def _fetch_jiosaavn_async(
 # ---------------------------------------------------------------------------
 
 _PROVIDER_MAP = {
+    "lyricsplus": lambda ctx: _fetch_lyricsplus_async(
+        ctx.clean_track,
+        ctx.clean_artist,
+        ctx.album_name,
+        ctx.duration_s,
+        ctx.isrc,
+    ),
+    "lrcred": lambda ctx: _fetch_lrcred_async(ctx.isrc),
     "spotify": lambda ctx: _fetch_spotify_async(
         ctx.spotify_id,
     ),
@@ -1246,43 +1197,6 @@ _PROVIDER_MAP = {
         ctx.duration_s,
         ctx.isrc,
         word_by_word=ctx.apple_word_by_word,
-    ),
-    "musixmatch": lambda ctx: _fetch_musixmatch_async(
-        ctx.clean_track,
-        ctx.clean_artist,
-        ctx.duration_s,
-    ),
-    "deezer": lambda ctx: _fetch_deezer_async(
-        ctx.clean_track,
-        ctx.clean_artist,
-    ),
-    "genius": lambda ctx: _fetch_genius_async(
-        ctx.clean_track,
-        ctx.clean_artist,
-    ),
-    "netease": lambda ctx: _fetch_paxsenix_search_provider_async(
-        "netease",
-        ctx.clean_track,
-        ctx.clean_artist,
-        ctx.duration_s,
-    ),
-    "qq": lambda ctx: _fetch_paxsenix_search_provider_async(
-        "qq",
-        ctx.clean_track,
-        ctx.clean_artist,
-        ctx.duration_s,
-    ),
-    "youtube": lambda ctx: _fetch_paxsenix_search_provider_async(
-        "youtube",
-        ctx.clean_track,
-        ctx.clean_artist,
-        ctx.duration_s,
-    ),
-    "kugou": lambda ctx: _fetch_paxsenix_search_provider_async(
-        "kugou",
-        ctx.clean_track,
-        ctx.clean_artist,
-        ctx.duration_s,
     ),
     "amazon": lambda ctx: _fetch_amazon_async(
         ctx.isrc,

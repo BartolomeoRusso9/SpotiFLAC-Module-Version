@@ -90,6 +90,61 @@ def test_a_dashboard_asked_for_by_an_account_covers_that_account() -> None:
     assert MornyeAPI().get_stats()["totals"]["tracks"] == 2
 
 
+def test_smb_library_scan_uses_saved_credentials_and_pushes_report(monkeypatch) -> None:
+    from mornye.api_mixins import stats as stats_mixin
+    from mornye.core import network_destinations, smb_library_scan
+
+    profile = network_destinations.validate_profile(
+        {
+            "id": "destination1234",
+            "name": "Home NAS",
+            "host": "nas.example.net",
+            "share": "Music",
+            "username": "music-user",
+        }
+    )
+
+    class DestinationStore:
+        def get(self, profile_id):
+            return profile if profile_id == profile.id else None
+
+        def credentials(self, selected, *, owner):
+            assert selected is profile
+            assert owner == "ada"
+            return "session-secret"
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon):
+            self.target = target
+            self.args = args
+            assert daemon is True
+
+        def start(self):
+            self.target(*self.args)
+
+    pushed = []
+    api = MornyeAPI()
+    api.owner = "ada"
+    api._push = lambda name, *args: pushed.append((name, args))
+
+    def fake_scan(selected, username, password, *, progress):
+        assert selected is profile
+        assert username == "music-user"
+        assert password == "session-secret"
+        progress(1, 1)
+        return {"source": "smb", "totals": {"tracks": 1}}
+
+    monkeypatch.setattr(network_destinations, "DESTINATIONS", DestinationStore())
+    monkeypatch.setattr(stats_mixin.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(smb_library_scan, "scan_smb_library", fake_scan)
+
+    assert api.scan_smb_library(profile.id) == {"status": "started"}
+    assert pushed == [
+        ("app_smb_library_progress", ({"done": 1, "total": 1},)),
+        ("app_smb_library_results", ({"source": "smb", "totals": {"tracks": 1}},)),
+    ]
+
+
 def test_a_csv_preview_matches_without_downloading_anything() -> None:
     api = MornyeAPI()
     content = (

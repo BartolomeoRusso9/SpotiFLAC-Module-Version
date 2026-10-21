@@ -15,6 +15,7 @@ import logging
 import ntpath
 import os
 import re
+import stat
 import threading
 import time
 import tempfile
@@ -451,6 +452,68 @@ class SMBBackend:
                 pass
             raise self._safe_connection_error(exc, writing=True) from None
         return {"ok": True, "message": "SMB connection and write permissions verified."}
+
+    def list_audio_files(self) -> list[dict[str, Any]]:
+        """List supported audio files under this destination without writing."""
+        from .tagger import SUPPORTED_SUFFIXES
+
+        client = self.connect()
+        pending = [self.root]
+        found: list[dict[str, Any]] = []
+        while pending:
+            directory = pending.pop()
+            entries = self._remote_call(
+                lambda directory=directory: list(client.scandir(directory)),
+                writing=False,
+            )
+            for entry in entries:
+                name = str(entry.name)
+                if (
+                    name in {"", ".", ".."}
+                    or ntpath.basename(name) != name
+                    or any(separator in name for separator in ("/", "\\", ":"))
+                ):
+                    continue
+                path = ntpath.join(directory, name)
+                info = self._remote_call(
+                    lambda entry=entry: entry.stat(follow_symlinks=False),
+                    writing=False,
+                )
+                if _is_directory(info):
+                    if not name.startswith("."):
+                        pending.append(path)
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                suffix = ntpath.splitext(name)[1].lower()
+                if suffix in SUPPORTED_SUFFIXES:
+                    found.append(
+                        {
+                            "path": path,
+                            "size": int(info.st_size),
+                            "modified": float(info.st_mtime),
+                        }
+                    )
+        return sorted(found, key=lambda entry: entry["path"].casefold())
+
+    def open_audio_file(self, path: str) -> Any:
+        """Open a listed SMB file for read-only metadata inspection."""
+        root = ntpath.normcase(ntpath.normpath(self.root))
+        target = ntpath.normcase(ntpath.normpath(str(path)))
+        try:
+            if ntpath.commonpath((root, target)) != root or target == root:
+                raise DestinationError(
+                    "The audio path is outside this SMB destination."
+                )
+        except ValueError as exc:
+            raise DestinationError(
+                "The audio path is outside this SMB destination."
+            ) from exc
+        client = self.connect()
+        return self._remote_call(
+            lambda: client.open_file(path, mode="rb"),
+            writing=False,
+        )
 
     def upload_tree(
         self,
