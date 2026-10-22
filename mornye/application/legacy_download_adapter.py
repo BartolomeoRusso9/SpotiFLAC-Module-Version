@@ -105,8 +105,10 @@ class LegacyDownloadAdapter(ProviderExecutor):
             lyrics_providers=config.lyrics.providers,
             save_lrc=config.lyrics.save_lrc,
             apple_lyrics_word_by_word=config.lyrics.word_by_word,
+            save_animated_artwork=config.metadata.save_animated_artwork,
             enrich_metadata=config.metadata.enrich,
             enrich_providers=config.metadata.providers,
+            animated_artwork_api_url=config.metadata.animated_artwork_api_url,
             output_path=None,
         )
 

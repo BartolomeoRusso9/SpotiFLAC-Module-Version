@@ -343,6 +343,7 @@ def test_from_cfg_round_trips_through_to_cfg() -> None:
         use_artist_subfolders=True,
         lyrics_providers=["lrclib"],
         enrich_providers=["deezer"],
+        animated_artwork_api_url="https://artwork.example.test",
         track_max_retries=3,
         timeout_s=90,
         post_download_action="notify",

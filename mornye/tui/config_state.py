@@ -28,6 +28,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from ..core.cli_preview import format_command, is_playlist_url
+from ..core.animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from ..core.paths import default_download_dir
 from ..core.quality import normalize_quality
 from ..core.transcode import is_lossless
@@ -134,6 +138,10 @@ class ConfigState:
     canvas_providers: list[str] = field(
         default_factory=lambda: list(DEFAULT_CANVAS_PROVIDERS),
     )
+    save_animated_artwork: bool = field(
+        default_factory=animated_artworks_enabled_by_default,
+    )
+    animated_artwork_api_url: str = field(default_factory=artwork_api_url)
 
     # ── Metadata enrichment ─────────────────────────────────────────────
     enrich_metadata: bool = True
@@ -346,6 +354,9 @@ class ConfigState:
         state.output_path = state.output_path or None
         state.qobuz_local_api_url = state.qobuz_local_api_url or None
         state.tidal_custom_api = state.tidal_custom_api or None
+        state.animated_artwork_api_url = (
+            state.animated_artwork_api_url or artwork_api_url()
+        )
 
         state.track_max_retries = max(0, int(state.track_max_retries or 0))
         state.max_concurrent_downloads = max(
@@ -397,6 +408,8 @@ class ConfigState:
             "save_canvas": state.save_canvas,
             "canvas_library_dir": state.canvas_library_dir,
             "canvas_providers": list(state.canvas_providers),
+            "save_animated_artwork": state.save_animated_artwork,
+            "animated_artwork_api_url": state.animated_artwork_api_url,
             "enrich_metadata": state.enrich_metadata,
             "enrich_providers": list(state.enrich_providers),
             "track_max_retries": state.track_max_retries,

@@ -65,6 +65,7 @@ If you just want a GUI for personal use, with no code involved, the [Mobile](htt
 - MusicBrainz metadata enrichment
 - Synchronized lyrics — embedded in the tag and, optionally, written out as `.lrc` files; word-by-word where the source has it, or line-synced if you prefer
 - Optional Canvas sidecars — the short looping visual a track carries, saved next to it as a video file (off by default; no media server reads these on its own)
+- Optional animated Apple Music album artwork — saved as `cover.webp` beside downloaded tracks and compatible with Navidrome (off by default)
 - Optional MP3 320 kbps transcoding
 - Watch mode: re-sync a playlist/album/artist/URL on an interval, indefinitely
 - Optional shared-secret or per-account authentication for `--web`, plus a queued, per-user download history in multi-user mode

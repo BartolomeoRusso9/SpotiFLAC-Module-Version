@@ -28,6 +28,8 @@ services:
       MORNYE_WEB_TOKEN: "a-long-random-string"
       MORNYE_DOWNLOAD_DIR: /app/downloads
       MORNYE_DATA_DIR: /home/mornye/.mornye
+      MORNYE_ANIMATED_ARTWORKS_ENABLED: "0"
+      MORNYE_ANIMATED_ARTWORKS_API_URL: https://artwork.m8tec.top
       MORNYE_PROGRESS_BARS: "0"
     volumes:
       - ./downloads:/app/downloads
@@ -118,7 +120,7 @@ network configuration are in [Network Destinations](network-destinations.md#dock
 
 For CLI downloads the output folder is the second argument (`mornye URL /app/downloads`), and the variable is not involved.
 
-**Lyrics and Canvas files.** Lyrics are embedded in the audio file; `--save-lrc` additionally writes an `.lrc` next to each track, so it lands in the download volume with no extra setup. A separate lyrics or Canvas folder (`--lrc-dir`, `--canvas-dir`, or the same settings in the GUI — see [Lyrics Files](configuration.md#lyrics-files-lrc)) takes a container path: mount a volume there.
+**Lyrics, Canvas, and animated artwork.** Lyrics are embedded in the audio file; `--save-lrc` additionally writes an `.lrc` next to each track, so it lands in the download volume with no extra setup. Canvas files and animated album artwork are also written alongside downloaded tracks (`cover.webp` for animated artwork), so they use the same download volume. A separate lyrics or Canvas folder (`--lrc-dir`, `--canvas-dir`, or the same settings in the GUI — see [Lyrics Files](configuration.md#lyrics-files-lrc)) takes a container path: mount a volume there.
 
 **Read-only root filesystem.** `read_only: true` works as long as the data and download directories are volumes and `/tmp` is writable:
 
@@ -182,6 +184,8 @@ Everything is optional except `MORNYE_REGISTRIES`. An empty value is the same as
 | `MORNYE_APPLE_STOREFRONT` | `us` | Apple Music storefront (country code) |
 | `MORNYE_APPLE_LYRICS_TRANSLATION`, `MORNYE_APPLE_LYRICS_PRONUNCIATION` | off | Also fetch translated / romanised Apple lyrics |
 | `MORNYE_LYRICS_JELLYFIN_COMPAT` | off | `1` keeps word-by-word lyrics readable in Jellyfin clients |
+| `MORNYE_ANIMATED_ARTWORKS_ENABLED` | off | `1` enables animated album artwork by default; the Metadata Enrichment setting can override it |
+| `MORNYE_ANIMATED_ARTWORKS_API_URL` | `https://artwork.m8tec.top` | API root for the [Apple Music Animated Artworks](https://github.com/m8tec/apple-music-animated-artworks) service; use your own instance URL to self-host |
 
 **Browser (Turnstile solver)**
 

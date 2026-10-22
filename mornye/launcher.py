@@ -36,6 +36,10 @@ from .check_update import check_for_updates_async
 from .client import _CleanConsoleFormatter
 from .core.library_notify import LIBRARY_TOKEN_ENV, LIBRARY_USER_ENV
 from .core.library_notify import SUPPORTED as LIBRARY_SUPPORTED
+from .core.animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from .core.notifiers import EVENTS as NOTIFY_EVENTS
 from .core.notifiers import KINDS as NOTIFY_KINDS
 from .core.notifiers import NOTIFY_TOKEN_ENV, NOTIFY_URL_ENV
@@ -910,6 +914,24 @@ def parse_args(profile_defaults: dict | None = None) -> argparse.Namespace:
         # soundcloud) if you want it.
         choices=["deezer", "apple", "qobuz", "tidal", "soundcloud"],
     )
+    enrich_grp.add_argument(
+        "--animated-artwork",
+        action=argparse.BooleanOptionalAction,
+        default=pd.get(
+            "save_animated_artwork",
+            animated_artworks_enabled_by_default(),
+        ),
+        dest="save_animated_artwork",
+        help=(
+            "download Apple Music animated album artwork as cover.webp "
+            "beside the tracks (requires ffmpeg)"
+        ),
+    )
+    enrich_grp.add_argument(
+        "--animated-artwork-api-url",
+        default=pd.get("animated_artwork_api_url", artwork_api_url()),
+        help="base URL for the animated artwork API",
+    )
 
     # ── Transcoding ──────────────────────────────────────────────────────────
     transcode_grp = parser.add_argument_group("Transcoding")
@@ -1413,6 +1435,10 @@ def _subscription_downloader(profile_defaults: dict, output_dir_override: str | 
             save_lrc=pd.get("save_lrc", False),
             lrc_library_dir=pd.get("lrc_library_dir") or None,
             save_canvas=pd.get("save_canvas", False),
+            save_animated_artwork=pd.get(
+                "save_animated_artwork",
+                animated_artworks_enabled_by_default(),
+            ),
             canvas_library_dir=pd.get("canvas_library_dir") or None,
             canvas_providers=pd.get("canvas_providers") or ["spotify", "paxsenix"],
             enrich_metadata=pd.get("enrich_metadata", True),
@@ -1626,6 +1652,7 @@ async def _run_download_async(
     save_lrc: bool = False,
     lrc_library_dir: str | None = None,
     save_canvas: bool = False,
+    save_animated_artwork: bool | None = None,
     canvas_library_dir: str | None = None,
     canvas_providers: list[str] | None = None,
     resume: bool = True,
@@ -1642,6 +1669,7 @@ async def _run_download_async(
     notify_chat_id: str = "",
     notify_on: str = "summary",
     smb_destination_id: str | None = None,
+    animated_artwork_api_url: str | None = None,
 ) -> None:
     """Async bridge to MornyeDownloader, bypassing the synchronous
     `Mornye()` wrapper (which would do a nested `asyncio.run()` and
@@ -1774,6 +1802,12 @@ async def _run_download_async(
         save_lrc=save_lrc,
         lrc_library_dir=lrc_library_dir,
         save_canvas=save_canvas,
+        save_animated_artwork=(
+            animated_artworks_enabled_by_default()
+            if save_animated_artwork is None
+            else save_animated_artwork
+        ),
+        animated_artwork_api_url=animated_artwork_api_url or artwork_api_url(),
         canvas_library_dir=canvas_library_dir,
         canvas_providers=canvas_providers or ["spotify", "paxsenix"],
         resume=resume,
@@ -1986,6 +2020,10 @@ async def run_download_from_cfg(cfg: dict, log_level: int) -> None:
             save_lrc=cfg.get("save_lrc", False),
             lrc_library_dir=cfg.get("lrc_library_dir") or None,
             save_canvas=cfg.get("save_canvas", False),
+            save_animated_artwork=cfg.get(
+                "save_animated_artwork",
+                animated_artworks_enabled_by_default(),
+            ),
             canvas_library_dir=cfg.get("canvas_library_dir") or None,
             canvas_providers=cfg.get("canvas_providers") or ["spotify", "paxsenix"],
             enrich_metadata=cfg.get("enrich_metadata", True),
@@ -2882,6 +2920,8 @@ async def amain() -> None:
             save_lrc=args.save_lrc,
             lrc_library_dir=args.lrc_library_dir,
             save_canvas=args.save_canvas,
+            save_animated_artwork=args.save_animated_artwork,
+            animated_artwork_api_url=args.animated_artwork_api_url,
             canvas_library_dir=args.canvas_library_dir,
             canvas_providers=args.canvas_providers,
             enrich_metadata=args.enrich,
@@ -2970,6 +3010,8 @@ async def amain() -> None:
                 "save_lrc": args.save_lrc,
                 "lrc_library_dir": args.lrc_library_dir,
                 "save_canvas": args.save_canvas,
+                "save_animated_artwork": args.save_animated_artwork,
+                "animated_artwork_api_url": args.animated_artwork_api_url,
                 "canvas_library_dir": args.canvas_library_dir,
                 "canvas_providers": args.canvas_providers,
             }

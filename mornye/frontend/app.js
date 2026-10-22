@@ -328,6 +328,12 @@ function applySettings(settings = {}) {
   if ($('config-lyrics')) { $('config-lyrics').checked = cfg.lyrics; onLyricsChange(); }
   if ($('config-apple-wbw')) $('config-apple-wbw').checked = cfg.apple_lyrics_word_by_word !== false;
   if ($('config-enrich')) { $('config-enrich').checked = cfg.enrich_metadata; onEnrichChange(); }
+  if ($('config-animated-artwork')) {
+    $('config-animated-artwork').checked = cfg.save_animated_artwork === true;
+  }
+  if ($('config-animated-artwork-api-url')) {
+    $('config-animated-artwork-api-url').value = cfg.animated_artwork_api_url || '';
+  }
   if ($('config-filename')) $('config-filename').value = cfg.filename_format;
   if ($('config-track-numbers')) { $('config-track-numbers').checked = cfg.use_track_numbers; onTNChange(); }
   if ($('config-album-track-numbers')) $('config-album-track-numbers').checked = cfg.use_album_track_numbers;
@@ -592,6 +598,8 @@ const DEFAULT_SETTINGS = {
   allow_fallback: false,
   lyrics: true,
   enrich_metadata: true,
+  save_animated_artwork: false,
+  animated_artwork_api_url: 'https://artwork.m8tec.top',
   filename_format: '{title} - {artist}',
   use_track_numbers: false,
   use_album_track_numbers: false,
@@ -4188,6 +4196,8 @@ function buildConfig() {
     lyrics_providers:       getChecked('lyrics-list'),
     apple_lyrics_word_by_word: $('config-apple-wbw') ? $('config-apple-wbw').checked : true,
     enrich_metadata:        $('config-enrich').checked,
+    save_animated_artwork:  $('config-animated-artwork')?.checked || false,
+    animated_artwork_api_url: $('config-animated-artwork-api-url')?.value.trim() || '',
     enrich_providers:       getChecked('enrich-list'),
     filename_format:         $('config-filename').value.trim() || '{title} - {artist}',
     use_track_numbers:      $('config-track-numbers').checked,
@@ -4548,6 +4558,12 @@ async function loadProfile() {
   $('config-lyrics').checked = data.lyrics !== false;
   if ($('config-apple-wbw')) $('config-apple-wbw').checked = data.apple_lyrics_word_by_word !== false;
   $('config-enrich').checked        = data.enrich_metadata !== false; onEnrichChange();
+  if ($('config-animated-artwork')) {
+    $('config-animated-artwork').checked = data.save_animated_artwork === true;
+  }
+  if ($('config-animated-artwork-api-url')) {
+    $('config-animated-artwork-api-url').value = data.animated_artwork_api_url || '';
+  }
   updateAllApiConfigDisplays();
   isDirty = true;
   updateSaveButtonVisual();

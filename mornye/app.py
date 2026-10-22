@@ -614,7 +614,21 @@ class MornyeAPI(
         try:
             settings_file = cache_path("gui-settings.json")
             if settings_file.exists():
-                return json.loads(settings_file.read_text(encoding="utf-8"))
+                settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            else:
+                settings = {}
+            if isinstance(settings, dict):
+                from .core.animated_artwork import (
+                    artwork_api_url,
+                    animated_artworks_enabled_by_default,
+                )
+
+                settings.setdefault(
+                    "save_animated_artwork",
+                    animated_artworks_enabled_by_default(),
+                )
+                settings.setdefault("animated_artwork_api_url", artwork_api_url())
+                return settings
         except Exception as e:
             self.log(f"Failed to load settings: {e}", "error")
         return {}
@@ -1649,6 +1663,18 @@ class MornyeAPI(
             save_lrc = config.get("save_lrc", False)
             lrc_library_dir = config.get("lrc_library_dir") or None
             save_canvas = config.get("save_canvas", False)
+            from .core.animated_artwork import (
+                artwork_api_url,
+                animated_artworks_enabled_by_default,
+            )
+
+            save_animated_artwork = config.get(
+                "save_animated_artwork",
+                animated_artworks_enabled_by_default(),
+            ) is True
+            animated_artwork_api_url = (
+                config.get("animated_artwork_api_url") or artwork_api_url()
+            )
             canvas_library_dir = config.get("canvas_library_dir") or None
             canvas_providers = config.get("canvas_providers") or [
                 "spotify",
@@ -1847,6 +1873,8 @@ class MornyeAPI(
                 save_lrc=save_lrc,
                 lrc_library_dir=lrc_library_dir,
                 save_canvas=save_canvas,
+                save_animated_artwork=save_animated_artwork,
+                animated_artwork_api_url=animated_artwork_api_url,
                 canvas_library_dir=canvas_library_dir,
                 canvas_providers=canvas_providers,
                 enrich_metadata=enrich_metadata,

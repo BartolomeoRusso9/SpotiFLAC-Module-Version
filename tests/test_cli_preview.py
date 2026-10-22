@@ -46,6 +46,38 @@ def test_watch_and_loop_can_both_appear() -> None:
     assert parts[parts.index("--watch") + 1] == "1440"
 
 
+def test_animated_artwork_can_be_enabled_in_the_command_preview(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MORNYE_ANIMATED_ARTWORKS_ENABLED", raising=False)
+
+    parts = build_command_parts(dict(_BASE_CFG, save_animated_artwork=True))
+
+    assert "--animated-artwork" in parts
+    assert "--no-animated-artwork" not in parts
+
+
+def test_custom_animated_artwork_api_url_is_in_the_command_preview(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MORNYE_ANIMATED_ARTWORKS_ENABLED", raising=False)
+    monkeypatch.setenv(
+        "MORNYE_ANIMATED_ARTWORKS_API_URL",
+        "https://default.example.test",
+    )
+    parts = build_command_parts(
+        dict(
+            _BASE_CFG,
+            save_animated_artwork=True,
+            animated_artwork_api_url="https://custom.example.test",
+        ),
+    )
+
+    assert parts[parts.index("--animated-artwork-api-url") + 1] == (
+        "https://custom.example.test"
+    )
+
+
 def test_a_flag_keeps_its_values_on_one_line() -> None:
     """The command is read, not just pasted.
 

@@ -68,6 +68,20 @@ def test_the_parallel_downloads_setting_is_wired_end_to_end(client) -> None:
     assert "max_concurrent_downloads" in app_js
 
 
+def test_animated_artwork_setting_is_in_metadata_enrichment(client) -> None:
+    html = client.get("/").text
+    assert 'id="config-animated-artwork"' in html
+    assert html.index('id="config-animated-artwork"') > html.index(
+        "Metadata Enrichment"
+    )
+
+    app_js = client.get("/app.js").text
+    assert "save_animated_artwork" in app_js
+    assert "$('config-animated-artwork')" in app_js
+    assert 'id="config-animated-artwork-api-url"' in html
+    assert "animated_artwork_api_url" in app_js
+
+
 def test_the_download_finished_event_takes_the_batch_it_closed(client) -> None:
     """Both parameters, in order, with their defaults — reformatting-proof.
 

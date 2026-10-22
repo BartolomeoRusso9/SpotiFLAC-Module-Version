@@ -50,6 +50,10 @@ services:
       # --web saves to ~/Music/Mornye, which is not mounted here.
       MORNYE_DOWNLOAD_DIR: "${MORNYE_DOWNLOAD_DIR:-/app/downloads}"
       MORNYE_DATA_DIR: "${MORNYE_DATA_DIR:-/home/mornye/.mornye}"
+      # Animated Apple Music album artwork. Set the first value to 1 to
+      # enable it by default; the Settings toggle can still override it.
+      MORNYE_ANIMATED_ARTWORKS_ENABLED: "${MORNYE_ANIMATED_ARTWORKS_ENABLED:-0}"
+      MORNYE_ANIMATED_ARTWORKS_API_URL: "${MORNYE_ANIMATED_ARTWORKS_API_URL:-https://artwork.m8tec.top}"
       # Root-assisted variant only (see `user:` above):
       # PUID: "${PUID:-1000}"
       # PGID: "${PGID:-1000}"

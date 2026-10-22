@@ -102,6 +102,13 @@ services:
       MORNYE_DB_PATH: "${MORNYE_DB_PATH:-}"
       MORNYE_CACHE_DIR: "${MORNYE_CACHE_DIR:-}"
 
+      # --- Animated Apple Music album artwork (optional) ------------------
+      # Set to 1 to enable by default. The Metadata Enrichment setting can
+      # still be changed per saved configuration.
+      MORNYE_ANIMATED_ARTWORKS_ENABLED: "${MORNYE_ANIMATED_ARTWORKS_ENABLED:-0}"
+      # Public API by default; set this to your own API's root URL if hosted.
+      MORNYE_ANIMATED_ARTWORKS_API_URL: "${MORNYE_ANIMATED_ARTWORKS_API_URL:-https://artwork.m8tec.top}"
+
       # --- Browser (Turnstile solver) --------------------------------------
       # How many Chromium instances may run at once (default 3). Each is a
       # few hundred MB of RAM while it lives; lower it on a small host.

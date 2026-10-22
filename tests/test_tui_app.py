@@ -96,6 +96,27 @@ async def test_editing_a_field_updates_the_state_and_the_command() -> None:
 
 
 @drives_the_ui
+async def test_animated_artwork_api_url_is_editable_and_reaches_the_command() -> None:
+    async with MornyeTui(_ready_state()).run_test() as pilot:
+        from textual.widgets import Input, Switch
+
+        api_url = app_of(pilot).query_one(
+            "#cfg-animated_artwork_api_url",
+            Input,
+        )
+        api_url.value = "https://artwork.example.test"
+        app_of(pilot).query_one("#cfg-save_animated_artwork", Switch).value = True
+        await pilot.pause()
+
+        assert app_of(pilot).state.animated_artwork_api_url == (
+            "https://artwork.example.test"
+        )
+        command = app_of(pilot).state.cli_command()
+        assert "--animated-artwork" in command
+        assert "--animated-artwork-api-url https://artwork.example.test" in command
+
+
+@drives_the_ui
 async def test_a_change_before_the_command_panel_exists_is_not_fatal() -> None:
     """Regression (seen on Windows CI): the form's Changed can reach the app
     before the command panel, composed after it, is mounted — and

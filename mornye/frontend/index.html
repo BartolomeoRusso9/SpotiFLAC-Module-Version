@@ -1052,6 +1052,17 @@
               <div class="s-title" style="margin-top:8px;">Enrichment Providers</div>
               <div id="enrich-list" class="sort-list"></div>
             </div>
+            <div class="s-row">
+              <span class="s-label">Download animated album artwork<small>Save as cover.webp; requires ffmpeg</small></span>
+              <label class="toggle">
+                <input type="checkbox" id="config-animated-artwork">
+                <span class="toggle-sl"></span>
+              </label>
+            </div>
+            <div class="s-row">
+              <span class="s-label">Animated artwork API URL<small>Leave blank to use the configured environment default</small></span>
+              <input type="url" id="config-animated-artwork-api-url" placeholder="https://artwork.m8tec.top" style="width:240px;">
+            </div>
           </div>
         </div>
 

@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 from typing_extensions import Self
 
 from .application import DownloadService, LegacyDownloadAdapter, MetadataService
+from .core.animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from .core.config import DownloadReport, DownloadRequest, MornyeConfig
 from .core.http import NetworkManager
 from .core.spotify_metadata import SpotifyMetadataClient, parse_spotify_url
@@ -144,6 +148,8 @@ class AsyncMornye:
         registries: list[str] | None = None,
         verify_hires: bool = False,
         redownload_fake_hires: bool = False,
+        save_animated_artwork: bool | None = None,
+        animated_artwork_api_url: str | None = None,
     ) -> None:
         self._logger = _setup_logger(log_level)
         self._sync_extensions_on_enter = sync_extensions
@@ -173,6 +179,12 @@ class AsyncMornye:
             save_canvas=save_canvas,
             canvas_library_dir=canvas_library_dir,
             canvas_providers=canvas_providers or ["spotify", "paxsenix"],
+            save_animated_artwork=(
+                animated_artworks_enabled_by_default()
+                if save_animated_artwork is None
+                else save_animated_artwork
+            ),
+            animated_artwork_api_url=animated_artwork_api_url or artwork_api_url(),
             enrich_metadata=enrich_metadata,
             enrich_providers=enrich_providers or ["deezer", "apple", "qobuz", "tidal"],
             qobuz_token=qobuz_token,
@@ -433,6 +445,8 @@ def Mornye(
     batch_tracks: bool = False,
     redownload_fake_hires: bool = False,
     prefetched_tracks: dict[str, TrackMetadata] | None = None,
+    save_animated_artwork: bool | None = None,
+    animated_artwork_api_url: str | None = None,
 ) -> None:
     """Backwards-compatible SYNCHRONOUS wrapper.
 
@@ -476,6 +490,8 @@ def Mornye(
             save_canvas=save_canvas,
             canvas_library_dir=canvas_library_dir,
             canvas_providers=canvas_providers or ["spotify", "paxsenix"],
+            save_animated_artwork=save_animated_artwork,
+            animated_artwork_api_url=animated_artwork_api_url,
             enrich_metadata=enrich_metadata,
             enrich_providers=enrich_providers,
             qobuz_token=qobuz_token,

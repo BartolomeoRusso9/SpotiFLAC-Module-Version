@@ -469,6 +469,23 @@ class ConfigPanel(VerticalScroll):
                 "Enrich metadata",
                 Switch(value=state.enrich_metadata, id=_field_id("enrich_metadata")),
             )
+            yield Row(
+                "Save animated album artwork",
+                Switch(
+                    value=state.save_animated_artwork,
+                    id=_field_id("save_animated_artwork"),
+                ),
+                hint="cover.webp; requires ffmpeg",
+            )
+            yield Row(
+                "Animated artwork API URL",
+                Input(
+                    value=state.animated_artwork_api_url,
+                    placeholder="https://artwork.m8tec.top",
+                    id=_field_id("animated_artwork_api_url"),
+                ),
+                hint="blank uses the environment default",
+            )
             yield Label("Enrichment providers, in order", classes="setting-label")
             yield SelectionList[str](
                 *[

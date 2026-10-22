@@ -5,6 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mornye.core.animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from mornye.core.models import DownloadResult, TrackMetadata
 
 
@@ -35,6 +39,10 @@ class MetadataConfig:
     providers: list[str] = field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],
     )
+    save_animated_artwork: bool = field(
+        default_factory=animated_artworks_enabled_by_default,
+    )
+    animated_artwork_api_url: str = field(default_factory=artwork_api_url)
 
 
 @dataclass
@@ -105,6 +113,16 @@ class MornyeConfig:
         config.metadata.enrich = getattr(options, "enrich_metadata", True)
         config.metadata.providers = list(
             getattr(options, "enrich_providers", config.metadata.providers)
+        )
+        config.metadata.save_animated_artwork = getattr(
+            options,
+            "save_animated_artwork",
+            config.metadata.save_animated_artwork,
+        )
+        config.metadata.animated_artwork_api_url = getattr(
+            options,
+            "animated_artwork_api_url",
+            config.metadata.animated_artwork_api_url,
         )
 
         config.lyrics.enabled = getattr(options, "embed_lyrics", True)

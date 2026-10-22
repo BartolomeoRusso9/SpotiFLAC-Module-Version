@@ -16,6 +16,10 @@ import time
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from .animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from .cross_loop_lock import CrossLoopLock
 from .paths import cache_path
 
@@ -53,6 +57,10 @@ class ProfileConfig(BaseModel):
     canvas_providers: list[str] = Field(
         default_factory=lambda: ["spotify", "paxsenix"],
     )
+    save_animated_artwork: bool = Field(
+        default_factory=animated_artworks_enabled_by_default,
+    )
+    animated_artwork_api_url: str = Field(default_factory=artwork_api_url)
     enrich_metadata: bool = True
     enrich_providers: list[str] = Field(
         default_factory=lambda: ["deezer", "apple", "qobuz", "tidal"],

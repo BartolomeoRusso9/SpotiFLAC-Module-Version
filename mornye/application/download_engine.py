@@ -36,6 +36,10 @@ from ..core.console import (
     print_track_header,
     print_track_skipped,
 )
+from ..core.animated_artwork import (
+    artwork_api_url,
+    animated_artworks_enabled_by_default,
+)
 from ..core.errors import ErrorKind, MornyeError
 from ..core.hooks import load_hooks, run_hooks
 from ..core.http import AsyncHttpClient
@@ -234,6 +238,10 @@ class DownloadOptions:
     # (-q HI_RES / HI_RES_LOSSLESS): asking for LOSSLESS and getting
     # standard-definition audio is not a fake, it is the request.
     redownload_fake_hires: bool = False
+    save_animated_artwork: bool = field(
+        default_factory=animated_artworks_enabled_by_default,
+    )
+    animated_artwork_api_url: str = field(default_factory=artwork_api_url)
 
     def __post_init__(self) -> None:
         # Normalize immediately so the rest of the code can do `if opts.transcode_to`
@@ -686,6 +694,16 @@ async def _write_canvas_sidecars_async(
     await _write_canvas_sidecars(result, metadata, opts)
     return
 
+
+async def _write_animated_artwork_sidecar_async(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    opts: DownloadOptions,
+) -> None:
+    from .post_processing import _write_animated_artwork_sidecar
+
+    await _write_animated_artwork_sidecar(result, metadata, opts)
+
     """Save the track's Spotify Canvas beside it, if asked for.
 
     Runs after transcoding and after any move, so the clip lands next to
@@ -999,6 +1017,7 @@ async def _download_one_pass_async(
             fmt=cast(Any, result_format_for(target_format)),
         )
         await _write_canvas_sidecars_async(skipped, metadata, opts)
+        await _write_animated_artwork_sidecar_async(skipped, metadata, opts)
         return skipped
 
     for attempt in range(opts.track_max_retries + 1):

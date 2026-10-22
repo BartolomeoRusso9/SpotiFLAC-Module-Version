@@ -64,6 +64,7 @@ async def apply_post_processing(
         await _write_lrc_sidecars(result, metadata, options)
     if result.success:
         await _write_canvas_sidecars(result, metadata, options)
+        await _write_animated_artwork_sidecar(result, metadata, options)
     return result
 
 
@@ -196,3 +197,37 @@ async def _write_canvas_sidecars(
             logger.info("[canvas] wrote %s (via %s)", path, canvas.provider)
     except Exception as exc:
         logger.warning("[canvas] could not save one for %s: %s", metadata.title, exc)
+
+
+async def _write_animated_artwork_sidecar(
+    result: DownloadResult,
+    metadata: TrackMetadata,
+    options: Any,
+) -> None:
+    if not getattr(options, "save_animated_artwork", False) or not result.file_path:
+        return
+
+    destination = Path(result.file_path).parent / "cover.webp"
+
+    from mornye.core.animated_artwork import (
+        AnimatedArtworkError,
+        download_animated_artwork_async,
+    )
+
+    try:
+        if destination.exists():
+            return
+        written = await download_animated_artwork_async(
+            metadata.first_album_artist,
+            metadata.album,
+            destination,
+            api_url=getattr(options, "animated_artwork_api_url", None),
+        )
+        if written:
+            logger.info("[animated-artwork] wrote %s", destination)
+    except (AnimatedArtworkError, OSError) as exc:
+        logger.warning(
+            "[animated-artwork] could not save artwork for %s: %s",
+            metadata.album,
+            exc,
+        )

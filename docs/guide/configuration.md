@@ -168,6 +168,30 @@ Both are off by default, and it is worth being clear about what the file is for:
 
 Neither endpoint is documented by Spotify. A track with no canvas is remembered for a week so that re-running a discography does not cost a request per track, a failed lookup is a debug line rather than a failed download, and an existing sidecar is left alone rather than fetched again.
 
+### Animated album artwork
+
+Mornye can use the [Apple Music Animated Artworks API](https://github.com/m8tec/apple-music-animated-artworks) to find and download matching animated album art. Enable **Download animated album artwork** under **Metadata Enrichment** in the GUI or TUI, pass `--animated-artwork` on the CLI, or set `save_animated_artwork=True` in Python. The adjacent API URL field in the GUI and TUI can point to a self-hosted instance; the CLI equivalent is `--animated-artwork-api-url`:
+
+```bash
+mornye https://open.spotify.com/album/... ./out --animated-artwork \
+  --animated-artwork-api-url https://artwork.m8tec.top
+```
+
+```python
+from mornye import Mornye
+
+Mornye(
+    url="https://open.spotify.com/album/...",
+    output_dir="./out",
+    save_animated_artwork=True,
+    animated_artwork_api_url="https://artwork.m8tec.top",
+)
+```
+
+The animation is converted to `cover.webp` in the downloaded track's folder, the format used by the linked downloader and supported by Navidrome. Existing `cover.webp` files are preserved. This is an album-level image, so downloads are best organized into album folders. The feature is off by default and requires `ffmpeg`; no matching artwork or an artwork conversion failure does not fail the audio download.
+
+Set `MORNYE_ANIMATED_ARTWORKS_ENABLED=1` to enable the option by default for new configurations. Set `MORNYE_ANIMATED_ARTWORKS_API_URL` to your own API root to self-host; the default is `https://artwork.m8tec.top`. In Docker, configure these variables in Compose. See [Docker environment variables](docker.md#environment-variables).
+
 ### Configuration Profiles
 
 Save and reuse complete download configurations without re-typing them every time.
