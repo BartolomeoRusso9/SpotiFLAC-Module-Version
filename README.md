@@ -35,11 +35,12 @@ If you are a copyright holder or an authorized representative and believe this r
 > **Looking for a standalone app?**
 >
 > - [Mornye (Mobile)](https://github.com/mornyeapp/Mornye) — Mornye for Android & iOS, maintained by [@zarzet](https://github.com/zarzet)
+> - [Mornye (Desktop)](https://github.com/mornyeapp/Mornye-Desktop) — Mornye for Windows, MacOS and Linux, maintained by [@zarzet](https://github.com/zarzet)
 ---
 
-## Why Python (instead of the standalone app)
+## Why Python (instead of the standalone apps)
 
-The Mobile app is built for direct, immediate use: open it, paste a link, download. Python exists for a different case — **integrating** this logic into something else.
+The standalone apps is built for direct, immediate use: open it, paste a link, download. Python exists for a different case — **integrating** this logic into something else.
 
 It makes sense to start here if:
 
